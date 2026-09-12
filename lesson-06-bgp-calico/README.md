@@ -219,29 +219,54 @@ Same shape as phase 1 — client → router → node → `kube-proxy` DNAT → p
 
 ## Step 6 — Make ECMP actually spread
 
-Twenty connections from the client, counting which node's MAC the router sent each new connection to:
+Twenty connections from the client, counting which node's MAC the router sent each new connection to. **Start the traffic first, then capture in the foreground** — see the note below for why that ordering matters:
 
 ```bash
-docker exec metallb-router rm -f /tmp/syn.pcap
-docker exec -d metallb-router tcpdump -i eth0 -n -e -w /tmp/syn.pcap 'tcp[tcpflags] & tcp-syn != 0'
-sleep 4
-docker exec metallb-client sh -c 'for i in $(seq 1 20); do curl -s -o /dev/null -m 3 http://172.19.255.200; done'
-docker exec metallb-router pkill tcpdump
-docker exec metallb-router tcpdump -r /tmp/syn.pcap -n -e | grep -oE '> [0-9a-f:]{17}' | sort | uniq -c
+# 1. the traffic, in the background
+( for i in $(seq 1 20); do
+    docker exec metallb-client curl -sS -o /dev/null -m 3 http://172.19.255.200
+    sleep 0.2
+  done ) &
+
+# 2. the capture, in the foreground: exits after 40 SYNs or 30s, whichever comes first
+docker exec metallb-router timeout 30 tcpdump -i eth0 -n -e -c 40 \
+  'tcp[tcpflags] & tcp-syn != 0' > /tmp/syn.txt 2>/dev/null
+wait
+
+# 3. where did the router send them?
+grep -oE '> [0-9a-f:]{17}' /tmp/syn.txt | sort | uniq -c
 ```
 
 ```console
-      6 > 76:c5:33:07:bb:3d      # → metallb-calico-worker2
-      6 > 7a:d6:76:00:09:aa      # → metallb-calico-control-plane
-      8 > 92:92:d2:d8:6c:fd      # → metallb-calico-worker
-     20 > f2:85:87:4c:4c:92      # the SYN arriving at the router
+captured lines: 39
+      7 > 02:75:73:9e:3a:90
+      9 > 12:6f:20:6f:b5:a4
+     19 > 2a:d4:01:9a:98:c2
+      3 > a2:ef:11:de:43:b3
 ```
 
-20 connections, all three nodes, no single-node bottleneck. (Decode MACs with `docker exec <node> ip -br link show eth0`.)
+Decode against each node's own MAC — they are assigned when the container is created, so yours will differ:
+
+```bash
+for n in metallb-calico-worker metallb-calico-worker2 metallb-calico-control-plane metallb-router; do
+  printf '%-30s %s\n' "$n" "$(docker exec $n ip -br link show eth0 | awk '{print $3}')"
+done
+```
+
+```console
+metallb-calico-worker          02:75:73:9e:3a:90     ← 7 connections
+metallb-calico-worker2         12:6f:20:6f:b5:a4     ← 9 connections
+metallb-calico-control-plane   a2:ef:11:de:43:b3     ← 3 connections
+metallb-router                 2a:d4:01:9a:98:c2     ← the 19 SYNs arriving
+```
+
+**19 connections, all three nodes, no single-node bottleneck.** (The 20th request reused an existing connection, so it produced no SYN — with keep-alive or HTTP reuse you will always see slightly fewer SYNs than requests.)
 
 **This is the whole promise of BGP mode, demonstrated.** Compare phase 1, where one elected node owned the VIP and every packet had to enter it. The cost is the block-level granularity from Step 4 and a static list to maintain.
 
-> 💡 If all 20 land on one node, your router is hashing on layer 3 only. `router-setup.sh` sets `net.ipv4.fib_multipath_hash_policy=1` for exactly this reason, and it can only be set at container creation.
+> ⚠️ **Do not capture with `docker exec -d` + `-w file`.** That form looks tidier but **silently produces an empty capture** often enough to waste an hour: the detached tcpdump is running, the traffic is flowing, and the file sits at its 24-byte pcap header with zero packets. (It is not a filter problem — the filter above is fine, and so is the file-writing form *when it works*.) The foreground `-c N` + `timeout` version cannot fail quietly: it prints packets as they arrive and exits on its own, so an empty result means genuinely no matching traffic.
+
+> 💡 If all connections land on one node, your router is hashing on layer 3 only. `router-setup.sh` sets `net.ipv4.fib_multipath_hash_policy=1` for exactly this reason, and it can only be set at container creation.
 
 ## Step 7 — `BGPFilter`: Calico's route policy
 
@@ -297,7 +322,7 @@ Now the router's table holds only the VIP block — no pod CIDRs. Two rules of t
 | Router RIB | 3 pod CIDRs × 3 paths, plus the advertised VIP block |
 | VIP in the router FIB | `172.19.255.0/24` with **3** nexthops |
 | Client via the router | `curl` returns a `whoami` pod |
-| 20 connections | spread across all 3 nodes (6 / 6 / 8) |
+| 20 connections | spread across all 3 nodes (7 / 9 / 3 in our run) |
 | `CalicoNodeStatus` | 2 × `NodeMesh` + 1 × `GlobalPeer`, all `Established` |
 | `whoami` from the host | still unreachable — the host has no route via the router |
 
