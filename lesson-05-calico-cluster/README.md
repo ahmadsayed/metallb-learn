@@ -145,6 +145,12 @@ egress OK
 > ```
 > The usual cause is Step 3 not having finished — most often the CRDs (`Installation` rejected) or the `Installation` never applied.
 
+> 💡 **Shortcut when you just want a yes/no on connectivity:** use an image that already ships `curl`, so there is no `apk add` to hang on —
+> ```bash
+> kubectl run nginx --rm -i --restart=Never --image=nginx -- curl -s http://httpbin.org/headers
+> ```
+> A JSON header echo proves DNS + egress in one line (cost: a ~190 MB image pull). It still cannot tell you *why* things failed, which is what the two-step version above is for.
+
 Note the pod IP: `192.168.x.x`, not phase 1's `10.244.x.x`. Every pod-IP output in Lessons 1–4 changes accordingly — the lesson's *behaviour* does not.
 
 ## Step 5 — Install MetalLB with everything except the controller disabled
