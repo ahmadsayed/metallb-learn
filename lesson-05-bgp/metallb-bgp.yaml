@@ -1,4 +1,4 @@
-# Lesson 5 — the MetalLB half of the BGP peering.
+  # Lesson 5 — the MetalLB half of the BGP peering.
 #
 # BGPPeer         : who to talk to, and as which autonomous system
 # BGPAdvertisement: which pools to advertise over those sessions

@@ -234,7 +234,10 @@ curl 172.19.255.200 -> no answer
 Let me build exactly that client:
 
 ```bash
-docker run -d --name metallb-client --network kind --cap-add NET_ADMIN alpine:3.20 sleep 3600
+# alpine ships almost nothing: install curl at startup, then keep the container alive
+docker run -d --name metallb-client --network kind --cap-add NET_ADMIN alpine:3.20 \
+  sh -c 'apk add --no-cache -q curl >/dev/null 2>&1; sleep infinity'
+sleep 10                                                     # let apk finish
 docker exec metallb-client ip route add 172.19.255.0/24 via 172.19.0.100
 docker exec metallb-client curl -s http://172.19.255.200 | head -3
 ```
@@ -244,6 +247,12 @@ Hostname: whoami-8644bfc655-kjzj9
 IP: 127.0.0.1
 IP: ::1
 ```
+
+> 💡 **The `alpine` image has no `curl`.** Two ways around it: install it as above (`docker exec metallb-client apk add --no-cache curl` also works on an already-running container), or use busybox's own `wget`, which *is* included:
+> ```bash
+> docker exec metallb-client wget -qO- http://172.19.255.200 | head -3
+> ```
+> The route is the other half of "let me build a client": without `ip route add`, the container sends the packet to its default gateway (the Docker bridge) instead of the router, and gets nothing back.
 
 The VIP works — because the client sends it to the router, and the router forwards it to a node that advertised the prefix.
 

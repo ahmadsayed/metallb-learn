@@ -109,12 +109,18 @@ whoami-shared-a   172.19.254.16
 whoami-shared-b   172.19.254.16
 ```
 
-And one address really does serve both:
+And one address really does serve both. The client from Lesson 5 only has a route for `172.19.255.0/24`, so teach it this lesson's range first:
+
+```bash
+docker exec metallb-client ip route add 172.19.254.0/24 via 172.19.0.100
+docker exec metallb-client curl -s http://172.19.254.16:80   | head -2
+docker exec metallb-client curl -s http://172.19.254.16:8080 | head -2
+```
 
 ```console
-$ curl http://172.19.254.16:80      # → whoami-shared-a
+# port 80   → whoami-shared-a
 Hostname: whoami-8644bfc655-5cz9s
-$ curl http://172.19.254.16:8080    # → whoami-shared-b
+# port 8080 → whoami-shared-b
 Hostname: whoami-8644bfc655-krrlf
 ```
 
