@@ -94,10 +94,10 @@ spec:
 
 > 💡 **Why no encapsulation?** All three nodes (and, later, the router) share one Docker bridge — the same "one L2 segment" topology as phase 1, and the on-premises topology Calico expects when peering with a ToR. With `encapsulation: None`, Calico routes pod traffic directly between nodes over BGP instead of tunnelling it, which is what makes the next lesson's routing table meaningful. If pod-to-pod traffic misbehaves in your environment, change `encapsulation` to `IPIP` and re-apply — the BGP parts of Lesson 6 are unaffected either way.
 
-> ⚠️ **Two failures this script exists to prevent**, both of which cost real time if you install Calico by hand:
+> ⚠️ **Two Calico traps the script handles for you** (the first one is what bit us):
 >
-> 1. **`tigera-operator.yaml` contains no CRDs** (~14 KB: namespace, RBAC, Deployment). The 32 CRDs live in a separate `operator-crds.yaml` (~2.6 MB). Skip it and the `Installation` fails with `no matches for kind "Installation" in version "operator.tigera.io/v1"`.
-> 2. **The CRDs need `kubectl apply --server-side`.** Client-side apply stores the whole object in the `last-applied-configuration` annotation, and annotations are capped at 262144 bytes — while `installations.operator.tigera.io` alone is **1.39 MB** of YAML. Client-side apply dies with `metadata.annotations: Too long`. Server-side apply tracks ownership in `managedFields` instead, so it has no such limit. (`gatewayapis.operator.tigera.io` at 303 KB survives client-side apply only because the limit applies to the JSON copy in the annotation, which encodes smaller than the YAML.)
+> 1. `tigera-operator.yaml` has **no CRDs** — they are in a separate `operator-crds.yaml`. Without it: `no matches for kind "Installation" in version "operator.tigera.io/v1"`.
+> 2. Those CRDs need `kubectl apply --server-side`, because client-side apply stores each object in an annotation capped at 262144 bytes, and the `installations` CRD alone is 1.39 MB: `metadata.annotations: Too long`.
 
 Nodes go `Ready` once `calico-node` is running on each one:
 
@@ -111,26 +111,18 @@ metallb-calico-worker2          Ready    <none>          2m    v1.35.0
 
 ## Step 4 — Prove pod networking works before touching load balancing
 
-Split the check in two: **did the pod get an address**, then **does egress work**. Keep it in two parts even with a `curl`-shipping image, because a pod with no CNI produces *no output at all* — a single combined one-liner leaves you staring at a hang instead of an error.
+Split the check in two — **did the pod get an address**, then **does egress work**. A pod with no CNI prints nothing at all, so a combined one-liner leaves you staring at a hang instead of an error.
 
 ```bash
 kubectl run nettest --image=nginx --restart=Never --command -- sleep 300
 kubectl wait --for=condition=Ready pod/nettest --timeout=60s || kubectl describe pod nettest | tail -15
-```
-
-```console
-# expected
-pod/nettest condition met
-```
-
-```bash
-kubectl get pod nettest -o wide          # expect a 192.168.x.y pod IP and a node
 kubectl exec nettest -- curl -s -m 5 http://httpbin.org/headers
 kubectl delete pod nettest
 ```
 
 ```console
 # expected
+pod/nettest condition met
 {
   "headers": {
     "Accept": "*/*",
@@ -141,32 +133,23 @@ kubectl delete pod nettest
 }
 ```
 
-`httpbin.org` echoes your request headers back, so one command proves DNS resolved, traffic left the cluster through the node's NAT, and a response came home. If httpbin is ever down, `curl -sS -o /dev/null -w 'HTTP %{http_code}\n' https://example.com` proves the same thing.
+`httpbin.org` echoes your request headers back, so this proves DNS resolved and traffic left the cluster. If the pod never becomes `Ready`, there is no CNI — check `kubectl get nodes` and `kubectl -n calico-system get pods`.
 
-> 💡 **Why `nginx` and not `alpine`:** this image already ships `curl`, so there is no `apk add curl` in the path — and that install is precisely the step that hangs for ever when the pod has no network, which turns a clear failure into a silent one. The cost is a ~190 MB pull instead of ~13 MB.
+Note the pod IP: `192.168.x.x`, not phase 1's `10.244.x.x`. Every pod-IP output in Lessons 1–4 changes accordingly — the behaviour does not.
 
-> ⚠️ **If `kubectl wait` times out**, the pod has no network and the smoke test was never going to work. `kubectl describe pod nettest` names the reason (`network plugin`, `failed to set up sandbox`, …). Check in this order:
-> ```bash
-> kubectl get nodes                              # NotReady = still no CNI
-> kubectl get installation default               # was the Installation applied at all?
-> kubectl get tigerastatus                       # Calico's own component health
-> kubectl -n calico-system get pods -o wide      # calico-node on every node?
-> ```
-> The usual cause is Step 3 not having finished — most often the CRDs (`Installation` rejected) or the `Installation` never applied.
+One more check while you are here: **pod-to-pod across two nodes**, which is what this cluster's `encapsulation: None` actually bets on (egress works in any mode):
 
-Note the pod IP: `192.168.x.x`, not phase 1's `10.244.x.x`. Every pod-IP output in Lessons 1–4 changes accordingly — the lesson's *behaviour* does not.
+```bash
+kubectl apply -f ../lesson-01-cluster/whoami.yaml
+kubectl get pods -l app=whoami -o wide
+NODE_A=$(kubectl get pods -l app=whoami -o jsonpath='{.items[0].spec.nodeName}')
+POD_B=$(kubectl get pods -l app=whoami -o jsonpath='{.items[1].status.podIP}')
+kubectl run crossnode --rm -i --restart=Never --image=nginx \
+  --overrides="{\"apiVersion\":\"v1\",\"spec\":{\"nodeName\":\"$NODE_A\"}}" \
+  -- curl -s -m 5 http://$POD_B | head -3
+```
 
-> 💡 **Egress is not the whole story.** Everything above would pass even if pod traffic were tunnelled, so it does not yet prove this cluster's `encapsulation: None` choice works. The test that does is **pod-to-pod across two different nodes** — run it once here, before anything is built on top:
-> ```bash
-> kubectl apply -f ../lesson-01-cluster/whoami.yaml
-> kubectl get pods -l app=whoami -o wide
-> NODE_A=$(kubectl get pods -l app=whoami -o jsonpath='{.items[0].spec.nodeName}')
-> POD_B=$(kubectl get pods -l app=whoami -o jsonpath='{.items[1].status.podIP}')
-> kubectl run crossnode --rm -i --restart=Never --image=nginx \
->   --overrides="{\"apiVersion\":\"v1\",\"spec\":{\"nodeName\":\"$NODE_A\"}}" \
->   -- curl -s -m 5 http://$POD_B | head -3
-> ```
-> A `Hostname: whoami-…` response means node A reached a pod on another node with **no tunnel**. A timeout means it did not — switch `encapsulation` to `IPIP` in the `Installation` and re-apply; Lesson 6's BGP work is unaffected either way.
+A `Hostname: whoami-…` answer means node A reached a pod on the other node with no tunnel. A timeout means it did not: switch `encapsulation` to `IPIP` in the `Installation` and re-apply — Lesson 6 is unaffected either way.
 
 ## Step 5 — Install MetalLB with everything except the controller disabled
 
