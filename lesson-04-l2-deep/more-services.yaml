@@ -1,0 +1,45 @@
+# Three more LoadBalancer Services pointing at the same 3 whoami pods.
+#
+# Why: layer 2 election happens *per load-balancer IP*, not per cluster. With
+# one VIP you only ever see one announcing node; with four VIPs you can watch
+# the hash(node + VIP) election spread the announcements across nodes.
+#
+# Each Service consumes one address from lab-pool (51 addresses, so we have room).
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami-b
+spec:
+  type: LoadBalancer
+  selector:
+    app: whoami
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami-c
+spec:
+  type: LoadBalancer
+  selector:
+    app: whoami
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami-d
+spec:
+  type: LoadBalancer
+  selector:
+    app: whoami
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
