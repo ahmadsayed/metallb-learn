@@ -149,7 +149,7 @@ How to read it:
 
 - `Up/Down 00:00:13` with a **numeric** `State/PfxRcd` means the session is **Established** — FRR replaces the state word with the number of prefixes received.
 - `PfxRcd 4` on two nodes: they are advertising our four VIPs to us.
-- **`PfxRcd 0` on `172.19.0.4`** — the control-plane is advertising *nothing*. That is not a bug, and finding out why is the most valuable part of this lesson.
+- **One peer advertises nothing** — in our capture that was `172.19.0.4`. Which IP is silent depends on *your* cluster, because the silent peer is always the **control-plane node** and Docker hands out node IPs in container start order. Check yours with `kubectl get nodes -o wide` (on a rebuild of this lab the control-plane came up as `172.19.0.2`). Either way it is not a bug, and finding out why is the most valuable part of this lesson.
 
 ## Step 6 — Why the control-plane stays silent
 
