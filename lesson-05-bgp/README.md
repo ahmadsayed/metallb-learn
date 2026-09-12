@@ -155,7 +155,11 @@ How to read it:
 
 ```bash
 kubectl get node metallb-lab-control-plane -o jsonpath='{.metadata.labels}' | tr ',' '\n' | grep -i exclude
-kubectl -n metallb-system logs <speaker-pod-on-control-plane> | grep 'skipping should announce'
+
+SPEAKER=$(kubectl -n metallb-system get pods \
+  -l app.kubernetes.io/component=speaker \
+  --field-selector spec.nodeName=metallb-lab-control-plane -o name)
+kubectl -n metallb-system logs "$SPEAKER" | grep 'skipping should announce'
 ```
 
 ```console
@@ -213,7 +217,7 @@ docker exec metallb-router ip route | grep 172.19.255
 With L2 mode, any client on the segment could reach the VIP by ARP. Watch what changed:
 
 ```bash
-ip neigh flush 172.19.255.200
+sudo ip neigh flush 172.19.255.200      # needs root: this edits the kernel's neighbour table
 curl --max-time 6 http://172.19.255.200
 ip neigh show 172.19.255.200
 ```
@@ -222,6 +226,8 @@ ip neigh show 172.19.255.200
 curl 172.19.255.200 -> no answer
 172.19.255.200 dev br-44d120cb051d FAILED
 ```
+
+> 💡 **`ip neigh flush` needs root**, and without it the command fails silently in a copy-paste. You do not actually need it: the entry ages out on its own (`REACHABLE` → `STALE` → failed re-probe → `FAILED`) within about a minute. Or put the question to a **brand-new client**, whose neighbour cache is empty by definition — Lesson 3's throwaway container does exactly that:
 
 **Nobody answers ARP for the VIP any more.** The host is on the same subnet so it tries to ARP for `172.19.255.200` and gets silence — the prefix only exists as a *route* now. Traffic has to arrive through the router, which is what happens naturally in a datacenter: clients are on other subnets and their default gateway *is* the router.
 
