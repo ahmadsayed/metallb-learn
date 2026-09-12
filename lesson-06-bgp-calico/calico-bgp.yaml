@@ -1,0 +1,24 @@
+# Lesson 6 — tell Calico about the router, and about the VIPs it should announce.
+#
+# Two different resources, two different jobs — the same split MetalLB made with
+# BGPPeer / BGPAdvertisement:
+#
+#   BGPPeer          : who to talk to, and in which AS        (this file)
+#   BGPConfiguration : which service addresses to advertise   (patched in the lesson)
+#
+# Calico peers are `projectcalico.org/v3` objects, so plain kubectl works —
+# calicoctl is a convenience, not a requirement.
+#
+# A BGPPeer with no nodeSelector is GLOBAL: every Calico node in the cluster
+# opens a session to the router. That is what we want here (and it is why BGP's
+# "one session per node pair" rule matters: MetalLB's speaker could not also
+# peer with this router).
+apiVersion: projectcalico.org/v3
+kind: BGPPeer
+metadata:
+  name: tor-router
+spec:
+  peerIP: 172.19.0.100     # the FRR container from router-setup.sh
+  asNumber: 64513          # the router's AS; Calico's own default AS is 64512
+  # Optional: peer only from some nodes, e.g. dedicated "border" nodes
+  # nodeSelector: rack == 'rack-1'

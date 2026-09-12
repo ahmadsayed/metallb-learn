@@ -18,6 +18,18 @@ Everything in this lesson comes from failures we actually hit while building the
 ## Files
 - none — this lesson is diagnostics, metrics and procedures against the running lab.
 
+> 🔀 **Read this if you are on the phase-2 (Calico) cluster.** The lesson was written against phase 1, where MetalLB's **speaker** announced. In phase 2 there is no speaker and no frr-k8s, so the *announcement* half of every table below lives in Calico instead:
+>
+> | Phase 1 artifact | Phase 2 replacement |
+> |---|---|
+> | `metallb-speaker` metrics (`metallb_speaker_announced`) | gone — scrape `calico-node`, or check the router's prefix count |
+> | `frrk8s_bgp_session_up`, `frrk8s_bgp_announced_prefixes_total` (port 9141) | gone — `CalicoNodeStatus` CR, `calicoctl node status`, router RIB |
+> | `ServiceL2Status` / `ServiceBGPStatus` / `BGPSessionState` CRs | gone — `BGPConfiguration.spec.serviceLoadBalancerIPs` + router state |
+> | `metallb_allocator_*` (port 9120) | **unchanged** — the controller still owns allocation |
+> | The `MetalLBServiceNotAnnounced` alert | must read Calico's state, otherwise it fires on every Service, forever |
+>
+> The *shape* of the workflow is identical — allocation problems still surface as `AllocationFailed` events on the Service, announcement problems still surface as "the network has no route" — only the tool you inspect changes.
+
 ## Step 1 — The one question that halves your debugging time
 
 ```

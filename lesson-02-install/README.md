@@ -71,7 +71,7 @@ Four things to notice:
 
 1. **`metallb-controller` is a Deployment with 1 replica.** Allocation must be a single decision, so MetalLB runs one (leader-elected) brain.
 2. **`metallb-speaker` is a DaemonSet, 3/3 on 3 nodes.** Announcement must happen on *every* node, because an ARP reply or a BGP session comes out of a specific machine.
-3. **`metallb-frr-k8s` is a separate DaemonSet** — this is the v0.16 default BGP backend, FRR running on each node. If you only ever use L2 mode, this is extra weight you can remove later (Lesson 6).
+3. **`metallb-frr-k8s` is a separate DaemonSet** — this is the v0.16 default BGP backend, FRR running on each node. It earns its keep only when MetalLB's speaker does BGP. This course never uses it: phase 1 is L2-only, and phase 2 hands BGP to Calico. To skip it, install with `--set frrk8s.enabled=false` (and see Lesson 5 for going further, to a **controller-only** install).
 4. **Two webhook services.** MetalLB validates your CRs (`IPAddressPool`, `L2Advertisement`, …) through an HTTPS admission webhook, so a typo is rejected at `kubectl apply` time instead of half-working at runtime.
 
 ```bash

@@ -1,0 +1,32 @@
+# MetalLB lab, phase 2 — the same 3 nodes, on Calico, with no encapsulation.
+#
+# Phase 1 (lessons 0-4) used kind's default CNI (kindnet) on the `kind` Docker
+# bridge, because layer 2 mode only needs a flat Ethernet segment and ARP.
+#
+# Phase 2 needs a real BGP speaker on every node, and BGP allows exactly ONE
+# session per pair of nodes. Calico's agent is already on every node, so it
+# becomes the speaker and MetalLB keeps the job it is uniquely good at:
+# allocating addresses.
+#
+# Two settings matter here:
+#
+#   disableDefaultCNI: true   without this, kindnet and Calico both try to own
+#                             pod networking and every pod gets two opinions
+#
+#   podSubnet: 192.168.0.0/16 Calico's default IPPool is 192.168.0.0/16, but
+#                             kind's default pod subnet is 10.244.0.0/16. Make
+#                             them agree here, or patch Calico's IPPool later.
+#
+# We keep kube-proxy in iptables mode on purpose: it is the DNAT path that
+# lessons 3-4 demonstrated, and Calico's eBPF mode would replace it.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: metallb-calico
+networking:
+  disableDefaultCNI: true
+  podSubnet: "192.168.0.0/16"
+  serviceSubnet: "10.96.0.0/16"
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker

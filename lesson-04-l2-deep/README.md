@@ -363,4 +363,4 @@ Its counterpart events are `serviceWithdrawn` (stopped announcing) and `nodeAssi
 - **L2 does not scale with nodes.** All the VIP traffic for a Service still enters one node. That is a property of ARP, not a MetalLB limitation.
 
 ## Next
-Continue to [Lesson 5 — BGP mode](../lesson-05-bgp/README.md).
+Continue to [Lesson 5 — Phase 2: rebuild the cluster on Calico](../lesson-05-calico-cluster/README.md), where the announcing job moves to Calico and MetalLB keeps allocation.

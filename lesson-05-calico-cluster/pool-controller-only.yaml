@@ -1,0 +1,21 @@
+# Lesson 5 — MetalLB controller-only: addresses without a speaker.
+#
+# In this phase Calico announces, so MetalLB must NOT announce. Installing it
+# with the speaker and the frr-k8s backend disabled leaves exactly one pod:
+#
+#   metallb-controller      →  allocates addresses from IPAddressPool,
+#                              writes status.loadBalancer.ingress,
+#                              runs the admission webhook
+#
+# That single object is what the whole of lesson 3 (pinning, sharing, pool
+# selection, exhaustion) still depends on — none of it needs a speaker.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: lab-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.19.255.200-172.19.255.250
+  # NOTE: there is deliberately no BGPAdvertisement and no L2Advertisement in
+  # this phase. Nobody in MetalLB announces anything.

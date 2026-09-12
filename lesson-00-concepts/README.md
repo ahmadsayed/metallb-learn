@@ -131,14 +131,14 @@ The router now spreads **connections** (per-connection hashing, typically 5-tupl
 | `frr` | **Deprecated** (will be removed) | You are already running it; migrate. |
 | `native` | Supported, "for deployments that require a smaller footprint" | You want no FRR processes/containers, and you only need plain IPv4/IPv6 unicast peering. |
 
-We use all three in this lab: **native** first (Lesson 5) because you can read everything it does in the speaker's own logs, then **frr-k8s** (Lesson 6) because that is what you will actually run.
+In **this course**, phase 2 uses none of them: the BGP speaker is **Calico** (Lesson 6) and MetalLB keeps allocation only (Lesson 5). You still need to know these backends — plenty of clusters do let MetalLB speak BGP, and if you ever run both Calico's and MetalLB's BGP toward the same router they conflict (one session per node pair, Lesson 6).
 
 ## 5. Which mode should you actually use?
 
 | Your situation | Use |
 |---|---|
 | Homelab, flat L2 network, no router you can configure | **L2** |
-| Datacenter with a ToR router you can peer with; need >1 node of ingress bandwidth | **BGP (frr-k8s)** |
+| Datacenter with a ToR router you can peer with; need >1 node of ingress bandwidth | **BGP** — MetalLB's own backend, or your CNI's (this course: Calico, Lesson 6) |
 | You need the VIP to follow healthy pods across clusters (anycast) | **BGP** |
 | Tiny cluster, no appetite for FRR containers | **BGP (native)** or **L2** |
 | You need source-IP preservation (`externalTrafficPolicy: Local`) | Both support it; in L2 it pins the VIP to a node running a pod |
@@ -163,8 +163,8 @@ Our cluster will use VIP `172.19.255.200`. A request from the host to the app:
 | 2 | Install MetalLB | controller + speaker pods running, 9 new CRDs |
 | 3 | `IPAddressPool` + `L2Advertisement` | `EXTERNAL-IP` becomes a real IP; `curl` answers from the host |
 | 4 | Kill the leader, flip `externalTrafficPolicy` | gratuitous ARP moves the VIP; source IP changes |
-| 5 | Peer with FRR (native backend) | `show bgp summary` = Established; VIP/32 in FRR's table |
-| 6 | Switch to frr-k8s and add ECMP | router shows 3 equal-cost next hops; connections spread |
+| 5 | Rebuild the cluster on Calico, MetalLB controller-only | an address is allocated and **nobody announces it** — by design |
+| 6 | Let Calico advertise the VIPs | router shows the VIP `/32`s with three next-hops; connections spread |
 | 7 | Share an IP, pin an address, select pools | one VIP serves two Services; a Service gets the IP you asked for |
 
 ## Next

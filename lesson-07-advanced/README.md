@@ -23,6 +23,17 @@ Lesson 3 gave every Service an address, first-come-first-served. Real clusters n
 - `service-selectors.yaml` — advertisement gated by a Service label.
 - `pool-access.yaml` — a pool restricted to one namespace (+ a Service that tries to steal from it).
 
+> 🔀 **Phase-2 adaptation.** This lesson was written on the phase-1 cluster, where MetalLB's speaker announced. On the Calico cluster (Lessons 5–6) the split changes, and it is worth knowing exactly how:
+>
+> | Recipe | In phase 2 |
+> |---|---|
+> | 1, 2, 3, 5 (pools, pinning, sharing, namespace rules) | **unchanged** — these are all *allocation*, which is still MetalLB's controller |
+> | The `BGPAdvertisement` companion in the YAML files | replace with adding the pool's addresses to `BGPConfiguration.spec.serviceLoadBalancerIPs` (Lesson 6) |
+> | 4 (advertisement `serviceSelectors`) | **does not exist in Calico.** The equivalent is negative: an address whose `/32` is *absent* from `serviceLoadBalancerIPs` is invisible to the network — see the rewritten Recipe 4 |
+> | 6 (`speaker.ignoreExcludeLB`) | no speaker to configure; Calico honours the same node label — see the rewritten Recipe 6 |
+>
+> Recipes 4 and 6 below have been rewritten for phase 2; the YAML files for them stay as phase-1 artifacts for reference.
+
 ## Recipe 1 — A pool nobody can take from by accident
 
 ```yaml
@@ -175,6 +186,30 @@ whoami-public     metallb-lab-worker2      # no rows for whoami-private
 
 > 💡 **BGP gotcha:** because the selector is evaluated per Service, "label it to publish" becomes a deployment-time decision, and `ServiceBGPStatus` is your audit trail of what is currently published. The same `serviceSelectors` field exists on `L2Advertisement` for ARP-based clusters.
 
+**🔀 Phase 2 (Calico): the same outcome, inverted.** Calico has no per-Service selector, so instead of *positively* selecting what to publish, you publish a list of addresses and everything else stays invisible:
+
+```bash
+# only whoami-public's /32 is announced; whoami-private is deliberately absent
+kubectl patch bgpconfiguration default --type=merge -p \
+  '{"spec": {"serviceLoadBalancerIPs": [{"cidr": "172.19.254.100/32"}]}}'
+```
+
+```console
+# expected — the router knows one of the two addresses
+172.19.254.100/32   172.19.0.2      0 64512 i
+172.19.254.101      (absent)
+```
+
+The trade-off shifts from "which Services?" to "which addresses, maintained where?":
+
+| | Phase 1 (MetalLB `serviceSelectors`) | Phase 2 (Calico `serviceLoadBalancerIPs`) |
+|---|---|---|
+| The gate | a Service label | presence of the address in a list |
+| Changes at deploy time? | yes — label the Service | no — someone must edit `/32` list in `BGPConfiguration` |
+| Audit trail | `ServiceBGPStatus` | the `BGPConfiguration` object itself |
+
+That last row is the real cost: with Calico the "what is published" answer lives in one cluster-wide object, not next to each Service. Keep it in Git (Lesson 8).
+
 ## Recipe 5 — A pool only one namespace may use
 
 ```yaml
@@ -225,6 +260,15 @@ Paths: (3 available, best #1, table default)
 ```
 
 More advertisers = more ECMP spread, at the cost of running a speaker on the control-plane (and of depending on it for traffic). A homelab with three beefy control-planes usually wants this; a production cluster with tainted, small control-planes usually does not.
+
+**🔀 Phase 2 (Calico): there is no speaker to configure.** The same node label decides whether a node advertises — but it is applied to *Calico's* view, not MetalLB's:
+
+```bash
+kubectl label node metallb-calico-control-plane \
+  node.kubernetes.io/exclude-from-external-load-balancers=true
+```
+
+Calico's docs list exactly this as the way to keep control-plane nodes out of service advertisement, so every conclusion from Lesson 5 still holds — including the surprise that mattered most: **the label exists with an empty value**, and existence is what counts. The difference is that in phase 2 you cannot override it with a Helm flag, because there is no MetalLB speaker whose opinion could differ. Want the control-plane to advertise? Remove the label.
 
 ## The gotcha this lesson created for itself
 
