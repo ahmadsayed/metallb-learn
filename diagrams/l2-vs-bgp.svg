@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 460" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <text x="20" y="24" font-size="19" font-weight="bold" fill="#0f172a">The same VIP, two ways to make the network find it</text>
+
+  <!-- ===================== left panel: L2 ===================== -->
+  <rect x="20" y="42" width="425" height="400" rx="14" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="40" y="72" font-size="16" font-weight="bold" fill="#1e3a8a">Layer 2 mode — ARP / NDP</text>
+  <text x="40" y="94" font-size="12.5" fill="#475569">one elected node answers for the VIP</text>
+
+  <rect x="40" y="112" width="110" height="52" rx="8" fill="#eef4ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="95" y="134" text-anchor="middle" font-size="13" fill="#1e3a8a">client</text>
+  <text x="95" y="152" text-anchor="middle" font-size="11" fill="#64748b">neighbor cache</text>
+
+  <line x1="150" y1="138" x2="215" y2="138" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="182" y="130" text-anchor="middle" font-size="10.5" fill="#475569">ARP?</text>
+
+  <rect x="215" y="106" width="212" height="54" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="2.5"/>
+  <text x="227" y="128" font-size="12.5" fill="#166534">worker — leader for this VIP</text>
+  <text x="227" y="147" font-size="11.5" fill="#334155">ARP reply: "it is my MAC"</text>
+
+  <rect x="215" y="168" width="212" height="46" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="227" y="188" font-size="12.5" fill="#64748b">worker2 — silent</text>
+  <text x="227" y="205" font-size="11" fill="#94a3b8">also receives the ARP broadcast</text>
+
+  <rect x="215" y="222" width="212" height="46" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="227" y="242" font-size="12.5" fill="#64748b">control-plane — silent</text>
+  <text x="227" y="259" font-size="11" fill="#94a3b8">leader is chosen by hash(node+VIP)</text>
+
+  <line x1="321" y1="160" x2="321" y2="292" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="330" y="230" font-size="11" fill="#475569">all VIP traffic</text>
+  <text x="330" y="245" font-size="11" fill="#475569">enters ONE node</text>
+
+  <rect x="215" y="296" width="212" height="52" rx="8" fill="#eef4ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="321" y="318" text-anchor="middle" font-size="12.5" fill="#1e3a8a">kube-proxy DNAT</text>
+  <text x="321" y="336" text-anchor="middle" font-size="11.5" fill="#334155">→ any ready whoami pod</text>
+
+  <text x="40" y="378" font-size="11.5" fill="#9a3412">⚠ ingress bandwidth ≤ one node</text>
+  <text x="40" y="398" font-size="11.5" fill="#9a3412">⚠ failover: gratuitous ARP + memberlist</text>
+  <text x="40" y="418" font-size="11.5" fill="#166534">✓ works on any dumb L2 network</text>
+
+  <!-- ===================== right panel: BGP ===================== -->
+  <rect x="460" y="42" width="420" height="400" rx="14" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="480" y="72" font-size="16" font-weight="bold" fill="#9a3412">BGP mode — routes + ECMP</text>
+  <text x="480" y="94" font-size="12.5" fill="#475569">every node advertises the VIP as a route</text>
+
+  <rect x="480" y="112" width="110" height="52" rx="8" fill="#eef4ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="535" y="134" text-anchor="middle" font-size="13" fill="#1e3a8a">client</text>
+  <text x="535" y="152" text-anchor="middle" font-size="11" fill="#64748b">default gw = router</text>
+
+  <line x1="590" y1="138" x2="640" y2="138" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="615" y="130" text-anchor="middle" font-size="10.5" fill="#475569">TCP</text>
+
+  <rect x="640" y="106" width="220" height="64" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="2.5"/>
+  <text x="750" y="128" text-anchor="middle" font-size="13" font-weight="bold" fill="#9a3412">router (FRR)</text>
+  <text x="750" y="148" text-anchor="middle" font-size="11.5" fill="#334155">FIB: 3 equal-cost routes</text>
+  <text x="750" y="164" text-anchor="middle" font-size="11" fill="#64748b">per-connection hashing</text>
+
+  <line x1="700" y1="170" x2="555" y2="212" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="750" y1="170" x2="750" y2="212" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow)"/>
+  <line x1="800" y1="170" x2="945" y2="212" stroke="#64748b" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+  <rect x="490" y="216" width="160" height="58" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="570" y="238" text-anchor="middle" font-size="12.5" fill="#166534">worker</text>
+  <text x="570" y="258" text-anchor="middle" font-size="11" fill="#334155">advertises VIP/32</text>
+
+  <rect x="670" y="216" width="160" height="58" rx="8" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="750" y="238" text-anchor="middle" font-size="12.5" fill="#166534">worker2</text>
+  <text x="750" y="258" text-anchor="middle" font-size="11" fill="#334155">advertises VIP/32</text>
+
+  <rect x="490" y="286" width="340" height="52" rx="8" fill="#ffffff" stroke="#cbd5e1"/>
+  <text x="660" y="308" text-anchor="middle" font-size="12" fill="#334155">each node: kube-proxy DNAT → any ready pod</text>
+  <text x="660" y="326" text-anchor="middle" font-size="11" fill="#64748b">(control-plane advertises too)</text>
+
+  <text x="480" y="372" font-size="11.5" fill="#166534">✓ real load balancing across nodes</text>
+  <text x="480" y="392" font-size="11.5" fill="#9a3412">⚠ needs a BGP-capable router you control</text>
+  <text x="480" y="412" font-size="11.5" fill="#9a3412">⚠ backend-set change rehashes → resets</text>
+</svg>

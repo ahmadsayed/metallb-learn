@@ -1,0 +1,49 @@
+# The app that will be exposed with a LoadBalancer Service.
+#
+# Three replicas so that later lessons can show that the load balancer IP is
+# not tied to any single pod: kill a pod, the VIP keeps serving.
+# "whoami" is handy because it prints the pod name that answered the request.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whoami
+  labels:
+    app: whoami
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: whoami
+  template:
+    metadata:
+      labels:
+        app: whoami
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.10.2
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami
+spec:
+  # This is the whole point of the course. On a cloud provider the cloud
+  # controller would fill in status.loadBalancer.ingress within seconds.
+  # On bare metal nobody is listening, so it stays <pending> ... until MetalLB.
+  type: LoadBalancer
+  selector:
+    app: whoami
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

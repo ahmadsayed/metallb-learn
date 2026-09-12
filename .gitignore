@@ -1,0 +1,4 @@
+# local scratch / captured output that should not be committed
+*.log
+tmp/
+.kubeconfig*

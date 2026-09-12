@@ -1,0 +1,19 @@
+# MetalLB lab cluster — 1 control-plane + 2 workers.
+#
+# MetalLB is only meaningful on a cluster that has NO cloud load-balancer
+# implementation: a Service of type LoadBalancer must stay <pending> until
+# MetalLB gives it an address. kind is exactly that cluster — bare metal in a
+# box.
+#
+# Networking is left at the kind defaults on purpose:
+#   * docker network "kind" carries all node traffic (we discover its subnet
+#     in Lesson 3 to pick a VIP range that is inside it),
+#   * kube-proxy runs in iptables mode, which is what makes Layer 2 mode work
+#     (the VIP is DNAT'ed in PREROUTING before the kernel tries to route it).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: metallb-lab
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
