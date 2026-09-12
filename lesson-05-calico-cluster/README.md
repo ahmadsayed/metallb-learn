@@ -92,7 +92,7 @@ spec:
         nodeSelector: all()
 ```
 
-> 💡 **Why no encapsulation?** All three nodes (and, later, the router) share one Docker bridge — the same "one L2 segment" topology as phase 1, and the on-premises topology Calico expects when peering with a ToR. With `encapsulation: None`, Calico routes pod traffic directly between nodes over BGP instead of tunnelling it, which is what makes the next lesson's routing table meaningful. If pod-to-pod traffic misbehaves in your environment, set `ipipMode: Always` and re-run — the BGP parts of Lesson 6 are unaffected either way.
+> 💡 **Why no encapsulation?** All three nodes (and, later, the router) share one Docker bridge — the same "one L2 segment" topology as phase 1, and the on-premises topology Calico expects when peering with a ToR. With `encapsulation: None`, Calico routes pod traffic directly between nodes over BGP instead of tunnelling it, which is what makes the next lesson's routing table meaningful. If pod-to-pod traffic misbehaves in your environment, change `encapsulation` to `IPIP` and re-apply — the BGP parts of Lesson 6 are unaffected either way.
 
 Nodes go `Ready` once `calico-node` is running on each one:
 

@@ -18,15 +18,25 @@ set -euo pipefail
 CALICO_VERSION="${CALICO_VERSION:-v3.30.3}"
 POD_CIDR="${POD_CIDR:-192.168.0.0/16}"
 
-echo "=== 1/4 Install the Tigera operator ($CALICO_VERSION) ==="
-kubectl create -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml" >/dev/null
+echo "=== 1/5 Install the operator CRDs ($CALICO_VERSION) ==="
+# IMPORTANT: tigera-operator.yaml does NOT contain the CRDs — it is only
+# ~14 KB of namespace + RBAC + the operator Deployment. The 32 CRDs
+# (including installations.operator.tigera.io) are in operator-crds.yaml,
+# a ~2.6 MB manifest. Apply the CRDs first, or the Installation below fails
+# with: no matches for kind "Installation" in version "operator.tigera.io/v1".
+kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/operator-crds.yaml"
+kubectl wait --for=condition=Established crd/installations.operator.tigera.io --timeout=180s
+
+echo "=== 2/5 Install the Tigera operator ==="
+kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml" >/dev/null
 kubectl -n tigera-operator rollout status deploy/tigera-operator --timeout=180s | tail -1
 
-echo "=== 2/4 Declare the Installation (no encapsulation, our pod CIDR) ==="
-# ipipMode/vxlanMode Never = "all nodes share one L2 segment", which is exactly
-# the on-premises topology this course simulates: nodes and the router on the
-# same switch. If pod-to-pod traffic misbehaves in your environment, switch
-# ipipMode to Always — the BGP parts of lesson 6 are unaffected.
+echo "=== 3/5 Declare the Installation (no encapsulation, our pod CIDR) ==="
+# encapsulation: None = "all nodes share one L2 segment", which is exactly the
+# on-premises topology this course simulates: nodes and the router on the same
+# switch, with Calico routing pod traffic over BGP instead of tunnelling it.
+# If pod-to-pod traffic misbehaves in your environment, change it to IPIP (or
+# VXLANCrossSubnet) and re-apply — the BGP parts of lesson 6 are unaffected.
 kubectl apply -f - <<EOF
 apiVersion: operator.tigera.io/v1
 kind: Installation
@@ -42,7 +52,7 @@ spec:
         nodeSelector: all()
 EOF
 
-echo "=== 3/4 Wait for calico-node on every node ==="
+echo "=== 4/5 Wait for calico-node on every node ==="
 # The nodes stay NotReady until the CNI is up. This is expected on a
 # disableDefaultCNI cluster, not a failure.
 for i in $(seq 1 60); do
@@ -52,7 +62,7 @@ for i in $(seq 1 60); do
 done
 kubectl get nodes
 
-echo "=== 4/4 Calico components ==="
+echo "=== 5/5 Calico components ==="
 kubectl -n calico-system get pods 2>/dev/null | head -10 || kubectl -n kube-system get pods | grep calico
 echo
 echo "Next: install MetalLB controller-only, then run kubectl apply -f pool-controller-only.yaml"
