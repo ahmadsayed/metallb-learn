@@ -179,11 +179,17 @@ One more check while you are here: **pod-to-pod across two nodes**, which is wha
 ```bash
 kubectl apply -f ../lesson-01-cluster/whoami.yaml
 kubectl get pods -l app=whoami -o wide
-NODE_A=$(kubectl get pods -l app=whoami -o jsonpath='{.items[0].spec.nodeName}')
-POD_B=$(kubectl get pods -l app=whoami -o jsonpath='{.items[1].status.podIP}')
+
+# pick a pod and a target on a DIFFERENT node, and print both before using them
+PODS=$(kubectl get pods -l app=whoami \
+  -o jsonpath='{range .items[*]}{.spec.nodeName}{" "}{.status.podIP}{"\n"}{end}')
+NODE_A=$(echo "$PODS" | head -1 | awk '{print $1}')
+POD_B=$(echo "$PODS"  | tail -1 | awk '{print $2}')
+echo "from $NODE_A -> pod $POD_B"
+
 kubectl run crossnode --rm -i --restart=Never --image=nginx \
   --overrides="{\"apiVersion\":\"v1\",\"spec\":{\"nodeName\":\"$NODE_A\"}}" \
-  -- curl -s -m 5 http://$POD_B | head -3
+  -- curl -sS -m 5 http://$POD_B | head -3
 ```
 
 ```console
@@ -195,6 +201,9 @@ whoami-8644bfc655-v44jj   1/1     Running   0          10s   192.168.81.193    m
 Hostname: whoami-8644bfc655-8lh9m
 IP: 192.168.237.194
 ```
+
+
+> 💡 **`-sS`, not `-s`.** `-s` silences curl *including its error messages*, so a failed request shows up only as `pod default/crossnode terminated (Error)` with no explanation. `-S` restores the message — the difference between "it did not work" and "URL rejected: No host part in the URL", which is what you get when `$POD_B` is empty because the variable-setting lines above were not run.
 
 A `Hostname: whoami-…` answer means `worker` reached a pod on `worker2` with **no tunnel**: `encapsulation: None` works. A timeout means it did not — switch `encapsulation` to `IPIP` and re-apply; Lesson 6 is unaffected either way.
 
