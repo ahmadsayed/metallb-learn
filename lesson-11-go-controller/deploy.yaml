@@ -1,0 +1,105 @@
+# Everything poolwatch needs to run inside the cluster.
+#
+# Note the RBAC: a controller that consumes someone else's CRDs needs read
+# access to them, and that is the *only* permission it gets. It can read
+# Services and MetalLB CRs, and create Events. It cannot change a pool, a
+# Service or an advertisement.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: poolwatch
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: poolwatch
+  namespace: poolwatch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: poolwatch
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # MetalLB's API group. The status CRs live in the metallb-system namespace,
+  # so read access has to be cluster-wide (or at least cover that namespace).
+  - apiGroups: ["metallb.io"]
+    resources: ["servicel2statuses", "servicebgpstatuses", "ipaddresspools"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: poolwatch
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: poolwatch
+subjects:
+  - kind: ServiceAccount
+    name: poolwatch
+    namespace: poolwatch
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: poolwatch
+  namespace: poolwatch
+  labels:
+    app: poolwatch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: poolwatch
+  template:
+    metadata:
+      labels:
+        app: poolwatch
+    spec:
+      serviceAccountName: poolwatch
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+      containers:
+        - name: poolwatch
+          image: poolwatch:lab
+          imagePullPolicy: IfNotPresent
+          args:
+            - --metrics-bind-address=:9090
+            - --sync-period=30s
+            - --zap-log-level=info
+          ports:
+            - name: metrics
+              containerPort: 9090
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: poolwatch
+  namespace: poolwatch
+  labels:
+    app: poolwatch
+spec:
+  selector:
+    app: poolwatch
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: metrics

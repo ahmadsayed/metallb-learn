@@ -3,5 +3,11 @@
 tmp/
 .kubeconfig*
 
+# editor
+.idea/
+
 # MetalLB source checkout used by Part II (clone it yourself, see lesson 9)
 .src/
+
+# built binaries (lesson 11)
+lesson-11-go-controller/poolwatch/poolwatch
