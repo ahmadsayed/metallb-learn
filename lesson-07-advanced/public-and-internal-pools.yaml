@@ -1,0 +1,62 @@
+# Lesson 7, recipe 4 — two classes of VIP, one of which the network never sees.
+#
+# Calico advertises whole CIDR blocks (Lesson 6), so "internal only" is decided
+# per block: the public block is listed in
+# BGPConfiguration.spec.serviceLoadBalancerIPs, the internal block is not.
+#
+#   lab-pool-public    172.19.254.100-109   → inside 172.19.254.0/24  → announced
+#   lab-pool-internal  172.19.252.1-14      → inside 172.19.252.0/28  → never listed
+#
+# Both pools allocate normally. The difference only shows up on the router.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: lab-pool-public
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.19.254.100-172.19.254.109
+  autoAssign: false
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: lab-pool-internal
+  namespace: metallb-system
+spec:
+  addresses:
+    - 172.19.252.1-172.19.252.14
+  autoAssign: false
+---
+# Allocated from the announced block: reachable from the routed client.
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami-public
+  annotations:
+    metallb.io/address-pool: lab-pool-public
+spec:
+  type: LoadBalancer
+  selector:
+    app: whoami
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Allocated from the unannounced block: works inside the cluster, invisible
+# outside it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami-internal
+  annotations:
+    metallb.io/address-pool: lab-pool-internal
+spec:
+  type: LoadBalancer
+  selector:
+    app: whoami
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

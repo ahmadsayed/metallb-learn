@@ -88,7 +88,7 @@ metallb-calico-worker          172.19.0.3
 metallb-calico-worker2         172.19.0.2
 ```
 
-> ⚠️ Docker hands these out in start order, so on a rebuild the roles and IPs can swap. `router-setup.sh` defaults to the set `{.2, .3, .4}`, which covers any arrangement — but if your cluster ever gets different IPs, pass `NODE1=… NODE2=… NODE3=… ./router-setup.sh`.
+> ⚠️ Docker hands out node IPs in start order, so on a rebuild the roles and IPs can swap. `router-setup.sh` defaults to the set `{.2, .3, .4}`, which covers any arrangement; if yours differ, pass them: `NODE1=… NODE2=… NODE3=… ./router-setup.sh`.
 
 ## Step 3 — Install Calico
 
@@ -119,11 +119,7 @@ bgpfilters                                 projectcalico.org/v3   false   BGPFil
 bgppeers                                   projectcalico.org/v3   false   BGPPeer
 ```
 
-> ⚠️ **Three things this script exists to get right.** All three are Calico-specific and all three produce confusing errors if you install by hand:
->
-> 1. **`tigera-operator.yaml` contains no CRDs** (~14 KB: namespace, RBAC, Deployment). The 32 CRDs live in a separate `operator-crds.yaml` (~2.6 MB). Skip it and the `Installation` fails with `no matches for kind "Installation" in version "operator.tigera.io/v1"`.
-> 2. **Those CRDs need `kubectl apply --server-side`.** Client-side apply stores each object in an annotation capped at 262144 bytes, and `installations.operator.tigera.io` alone is **1.39 MB**: `metadata.annotations: Too long`.
-> 3. **The `Installation` is not enough — you also need an `APIServer`.** The `Installation` gives you Calico *networking*; the `APIServer` gives you `projectcalico.org/v3`, the API every Calico manifest uses. Without it, `kubectl get crd | grep bgppeer` shows the CRD exists, yet `kubectl apply` on any Calico CR fails with `no matches for kind "BGPPeer" in version "projectcalico.org/v3"`. The CRDs publish `crd.projectcalico.org/v1`; `v3` is served by the aggregated API server, which only exists once you create that object.
+> 💡 **Why a script instead of three copy-pasted commands.** Calico's install has two sharp edges: `tigera-operator.yaml` ships **no CRDs** (they are in a separate 2.6 MB `operator-crds.yaml`, and they need `--server-side`), and the `Installation` gives you networking but not the `projectcalico.org/v3` API — that comes from the `APIServer` object. Skip either and `kubectl apply` answers `no matches for kind …`. The script does all three in order and waits for each.
 
 All components land in `calico-system`:
 
@@ -150,7 +146,7 @@ csi-node-driver-ld7wz                      2/2     Running   0          65s   19
 
 ## Step 4 — Prove pod networking works before touching load balancing
 
-Split the check in two — **did the pod get an address**, then **does egress work**. A pod with no CNI prints nothing at all, so a combined one-liner leaves you staring at a hang instead of an error.
+Split the check in two: **did the pod get an address**, then **does egress work**.
 
 ```bash
 kubectl run nettest --image=nginx --restart=Never --command -- sleep 300
@@ -203,9 +199,6 @@ Hostname: whoami-8644bfc655-8lh9m
 IP: 192.168.237.194
 ```
 
-
-> 💡 **`-sS`, not `-s`.** `-s` silences curl *including its error messages*, so a failed request shows up only as `pod default/crossnode terminated (Error)` with no explanation. `-S` restores the message — the difference between "it did not work" and "URL rejected: No host part in the URL", which is what you get when `$POD_B` is empty because the variable-setting lines above were not run.
-
 A `Hostname: whoami-…` answer means `worker` reached a pod on `worker2` with **no tunnel**: `encapsulation: None` works. A timeout means it did not — switch `encapsulation` to `IPIP` and re-apply; Lesson 6 is unaffected either way.
 
 ## Step 5 — Install MetalLB with everything except the controller disabled
@@ -244,23 +237,7 @@ metallb-controller-5d85bd46d8-nhdlq   1/1     Running   0          14s
 | `metallb-speaker` | disabled | Calico announces. Also: it *couldn't* peer even if enabled — one session per node pair |
 | `metallb-frr-k8s` | disabled | Existed only to give the speaker an FRR backend. No speaker, no FRR |
 
-> 🐞 **Known bug in chart 0.16.1 — this is why the order above is namespace → RBAC → install.** The chart renders the `metallb-pod-lister` Role *and* RoleBinding inside `{{- if .Values.speaker.enabled }}`. Disable the speaker and both disappear — but the **controller** uses that Role: its own Pod (for owner references), plus secrets, configmaps and all the MetalLB CRs it reads to allocate. Install without the workaround and the controller crash-loops, `--wait` times out after five minutes with `INSTALLATION FAILED: context deadline exceeded`, and the logs show:
->
-> ```console
-> error: pods "metallb-controller-xxx" is forbidden: User "system:serviceaccount:metallb-system:metallb-controller"
->   cannot get resource "pods" in API group "" in the namespace "metallb-system"
-> msg: "unable to get own pod for owner references"
-> msg: "failed to create k8s client"
-> ```
->
-> Fixed upstream by [PR #3069](https://github.com/metallb/metallb/pull/3069) — merged 2026-06-10, while the newest chart release (`0.16.1`) is from 2026-05-27. So no published chart has the fix yet, and controller-only installs need the workaround. A RoleBinding may reference a ServiceAccount that does not exist yet, which is why applying it *before* the install is safe and makes `--wait` succeed.
->
-> Once a chart containing #3069 is released, drop `controller-only-rbac.yaml` and the `kubectl create namespace` line — the chart will create those objects itself.
-
-> 💡 Also delete any leftover advertisement CRs if you are re-running this on a cluster that used to have them. They are inert without a speaker, but they confuse the next reader:
-> ```bash
-> kubectl -n metallb-system delete bgppeer,bgpadvertisement,l2advertisement --all 2>/dev/null
-> ```
+> 🐞 **Chart 0.16.1 bug — this is why the order is namespace → RBAC → install.** The chart renders the `metallb-pod-lister` Role and RoleBinding inside `{{- if .Values.speaker.enabled }}`, but the **controller** is what uses them (its own Pod for owner references, plus the CRs it reads to allocate). Disable the speaker without the workaround and the controller crash-loops on `cannot get resource "pods"`, and `--wait` dies with `INSTALLATION FAILED: context deadline exceeded`. Fixed upstream in [PR #3069](https://github.com/metallb/metallb/pull/3069), merged after the 0.16.1 release — once a chart ships it, drop `controller-only-rbac.yaml`.
 
 ## Step 6 — Allocate an address with no announcer in sight
 
@@ -325,10 +302,9 @@ Lesson 6 makes it real.
 
 ## Production note
 
-- **Pin your Calico version.** Calico's service-IP advertisement changed across releases (Lesson 6 lists the specific issues), and a course or runbook that says "latest" is not reproducible.
-- **Decide the dataplane deliberately.** No-encapsulation means the fabric must route pod CIDRs — fine when you peer with ToRs (Lesson 6 shows your router learning them), wrong if your network can't. VXLAN/IPIP are the alternatives.
-- **Install the `APIServer` if you want `projectcalico.org/v3`.** Many real clusters skip it and manage Calico with `calicoctl`, which talks to the datastore directly. With plain `kubectl` and the documented `v3` manifests, you need the API server.
-- **Keep `kube-proxy`.** Calico's eBPF mode replaces it; that changes the ingress DNAT path this course teaches, and mixing it with VIP experiments adds variables you don't want while learning.
+- **Pin your Calico version.** Calico's service-IP advertisement changed across releases, and a runbook that says "latest" is not reproducible.
+- **Decide the dataplane deliberately.** No-encapsulation means the fabric must route pod CIDRs — fine when you peer with ToRs (Lesson 6 shows your router learning them), wrong if your network can't. VXLAN and IPIP are the alternatives.
+- **Install the `APIServer` if you want `projectcalico.org/v3`.** Many real clusters skip it and manage Calico with `calicoctl`, which talks to the datastore directly. With plain `kubectl` and the documented `v3` manifests, you need it.
 - **Two CRs, one decision:** MetalLB owns the *address*, Calico owns the *route*. Write that down for whoever is on call — the failure modes land in different components (Lesson 8).
 
 ## Next

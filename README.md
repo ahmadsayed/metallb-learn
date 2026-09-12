@@ -19,9 +19,9 @@ Learn how a bare-metal Kubernetes cluster gets `LoadBalancer` services: from a S
 | # | Lesson | What you do |
 |---|--------|-------------|
 | **5** | [Phase 2: rebuild the cluster on Calico](lesson-05-calico-cluster/README.md) | new Calico cluster, then MetalLB installed **controller-only** — allocation without a speaker |
-| **6** | [BGP with Calico](lesson-06-bgp-calico/README.md) | Calico peers with a real router and announces the VIPs; ECMP, `/32`s, `BGPFilter` |
-| **7** | [Advanced addressing](lesson-07-advanced/README.md) | reserved pools, pinned addresses, IP sharing, per-namespace pools — and internal-only VIPs the Calico way |
-| **8** | [Operations & troubleshooting](lesson-08-operations/README.md) | metrics and alert rules, a failure-mode matrix, safe upgrades — with the phase-2 mapping |
+| **6** | [BGP with Calico](lesson-06-bgp-calico/README.md) | Calico peers with a real router and announces the VIPs; ECMP, advertised blocks, `BGPFilter` |
+| **7** | [Advanced addressing](lesson-07-advanced/README.md) | reserved pools, pinned addresses, IP sharing, per-namespace pools — and internal-only VIPs by leaving a block unannounced |
+| **8** | [Operations & troubleshooting](lesson-08-operations/README.md) | what the controller exposes, four alert rules, a failure-mode matrix, safe upgrades |
 
 **Part II — Internals: read and extend the Go code**
 
@@ -49,7 +49,7 @@ MetalLB is two programs. The **controller** watches Services, hands out addresse
 
 ## How to use this course
 
-Each lesson has the same shape: a **Glossary**, a list of **Files**, numbered **Steps** with the exact commands, and an **Expected outcome** table. Steps that exist only because of the kind simulation are tagged 🧪 **Lab Hack**, with the production equivalent tagged 🏭 **Production**.
+Each lesson has the same shape: a **Glossary**, a list of **Files**, numbered **Steps** (or **Recipes** in Lesson 7) with the exact commands, and an **Expected outcome** table. Steps that exist only because of the kind simulation are tagged 🧪 **Lab Hack**, with the production equivalent tagged 🏭 **Production**.
 
 Two tracks:
 

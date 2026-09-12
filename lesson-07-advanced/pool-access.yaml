@@ -1,14 +1,11 @@
-# Lesson 7, recipe 4 — who is allowed to use a pool.
+# Lesson 7, recipe 5 — who is allowed to use a pool.
 #
 # serviceAllocation lets a pool declare which namespaces (or which Services, via
 # serviceSelectors) may allocate from it. Combined with autoAssign: false this
-# gives a pool that is reserved for one team and cannot be consumed by accident.
+# gives a pool reserved for one team that cannot be consumed by accident.
 #
 # namespaceSelectors / serviceSelectors accept the usual Kubernetes label
 # selector shape; priority breaks ties when several pools could serve a Service.
-#
-# Note: this is an *allocation* control. It does not stop a Service from being
-# advertised — that is what the advertisement's own serviceSelectors are for.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -26,17 +23,6 @@ spec:
   serviceAllocation:
     namespaces:
       - team-a
----
-apiVersion: metallb.io/v1beta1
-kind: BGPAdvertisement
-metadata:
-  name: lab-bgp-team-a
-  namespace: metallb-system
-spec:
-  ipAddressPools:
-    - lab-pool-team-a
-  communities:
-    - lab-public
 ---
 # A small app in team-a so the VIP has endpoints to serve.
 apiVersion: apps/v1

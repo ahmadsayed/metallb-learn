@@ -4,10 +4,9 @@
 # for every peer. A BGPFilter lets you control what crosses one specific BGP
 # session — here, the session with the "datacenter router".
 #
-# Rules are ordered, the first match wins, and the default when nothing matches
-# is Accept. So the pattern is an explicit pair: accept the block you want out,
-# then reject everything that is not in it. The import rules keep the router
-# from feeding us anything outside that block.
+# Rules are ordered and the first match wins, so the pattern is: accept each
+# block you are willing to advertise, then one rule with no criteria, which
+# matches everything left. Lesson 7 announces the second block.
 #
 # Verified effect (Step 7):
 #   before:  192.168.64.64/26  192.168.81.192/26  192.168.237.192/26  172.19.255.0/24
@@ -23,10 +22,9 @@ spec:
     - action: Accept
       matchOperator: In
       cidr: 172.19.255.0/24     # the VIP block: let it out
-    - action: Reject
-      matchOperator: NotIn
-      cidr: 172.19.255.0/24     # everything else: keep it in
+    - action: Accept
+      matchOperator: In
+      cidr: 172.19.254.0/24     # Lesson 7's VIP block
+    - action: Reject            # no criteria = everything else stays in
   importV4:
-    - action: Reject
-      matchOperator: NotIn
-      cidr: 172.19.255.0/24     # we only trust the VIP block from the router
+    - action: Reject            # we learn nothing from the ToR

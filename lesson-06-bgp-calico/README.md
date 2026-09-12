@@ -166,7 +166,7 @@ Paths: (9 available, best #1, table default)
 	nexthop via 172.19.0.3 dev eth0 weight 1
 ```
 
-**Every node advertises it, so the router installs three equal-cost next hops.** That is the fan-out that makes ECMP possible — and unlike phase 1, all three nodes participate, control-plane included (no node carries the `exclude-from-external-load-balancers` label here).
+**Every node advertises it, so the router installs three equal-cost next hops.** That is the fan-out that makes ECMP possible. Unlike phase 1, the control-plane is in: Calico does not honour Kubernetes' `exclude-from-external-load-balancers` label (which kind puts, empty, on the control-plane), so who advertises is a per-node decision you make on the `BGPPeer` — Lesson 7, recipe 6.
 
 Note the granularity: `serviceLoadBalancerIPs` takes **blocks**. On Calico 3.30.3 the per-address `/32` form is not advertised at all — the block is the unit of advertisement, so MetalLB's per-Service granularity has no equivalent here. Two consequences:
 
@@ -256,13 +256,12 @@ spec:
     - action: Accept
       matchOperator: In
       cidr: 172.19.255.0/24     # the VIP block: let it out
-    - action: Reject
-      matchOperator: NotIn
-      cidr: 172.19.255.0/24     # everything else: keep it in
+    - action: Accept
+      matchOperator: In
+      cidr: 172.19.254.0/24     # Lesson 7's VIP block
+    - action: Reject            # no criteria = everything else stays in
   importV4:
-    - action: Reject
-      matchOperator: NotIn
-      cidr: 172.19.255.0/24
+    - action: Reject            # we learn nothing from the ToR
 ```
 
 ```bash
@@ -270,7 +269,7 @@ kubectl apply -f bgpfilter.yaml
 kubectl patch bgppeer tor-router --type=merge -p '{"spec":{"filters":["services-only"]}}'
 ```
 
-Rules are ordered, the first match wins, and the default when nothing matches is `Accept` — which is why the pattern is an explicit pair: accept the block you want out, then reject everything that is not in it. Before and after, on the router:
+Rules are ordered and the first match wins, so the pattern is: accept each block you are willing to advertise, then one rule with no criteria to catch the rest. Before and after, on the router:
 
 ```console
 # before — Calico's pod blocks as well as the VIP block

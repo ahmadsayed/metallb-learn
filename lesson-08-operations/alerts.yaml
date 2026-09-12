@@ -1,0 +1,55 @@
+# Prometheus alerting rules for a MetalLB + Calico cluster (Lesson 8).
+#
+# There is no Prometheus in this lab, so nothing applies this file — it is the
+# artifact you keep in Git and hand to whoever runs your monitoring stack.
+#
+# What is alertable and what is not, in phase 2:
+#   * Allocation is MetalLB's, and the controller exposes pool capacity plus
+#     its own Kubernetes client health. Those are the recorded metrics here.
+#   * Allocation *failures* are Kubernetes events (`reason=AllocationFailed`),
+#     not metrics — alert on them with an event exporter if you have one.
+#   * Announcement is Calico's, and Calico exposes no per-prefix BGP metric by
+#     default (`prometheusMetricsPort` is unset in FelixConfiguration). A probe
+#     against the VIP is the honest way to catch "allocated but unreachable".
+groups:
+  - name: metallb
+    rules:
+      # 1. A pool is nearly exhausted: the next Service waits forever.
+      - alert: MetalLBPoolExhausted
+        expr: >
+          metallb_allocator_addresses_in_use_total
+            / on(pool) metallb_allocator_addresses_total > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MetalLB pool {{ $labels.pool }} is over 90% allocated"
+
+      # 2. The controller is running on a stale configuration: a CR it could
+      #    not apply. Everything downstream of that config is now wrong.
+      - alert: MetalLBConfigStale
+        expr: metallb_k8s_client_config_stale_bool == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MetalLB controller is running on a stale configuration"
+
+      # 3. Updates failing at all — anything from the API server to a webhook.
+      - alert: MetalLBUpdateErrors
+        expr: increase(metallb_k8s_client_update_errors_total[15m]) > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MetalLB failed to apply {{ $value }} object updates"
+
+      # 4. The only announcement signal that works in both phases: ask a client
+      #    whether the VIP answers. Requires a blackbox exporter.
+      - alert: MetalLBVIPUnreachable
+        expr: probe_success{job="metallb-vip"} == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LoadBalancer VIP {{ $labels.instance }} does not answer"

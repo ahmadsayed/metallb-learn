@@ -3,13 +3,11 @@
 #   metallb.io/address-pool: lab-pool-reserved   → which pool to allocate from
 #   metallb.io/loadBalancerIPs: 172.19.254.15   → the exact address to use
 #
-# Prefer the annotation over spec.loadBalancerIP: the field is deprecated in
-# the Kubernetes API (and it cannot express dual-stack). Both are still honoured
-# by MetalLB.
+# Prefer the annotation over spec.loadBalancerIP: the field is deprecated in the
+# Kubernetes API and cannot express dual-stack.
 #
-# A pinned address must live inside a pool MetalLB owns, otherwise allocation
-# fails and the Service stays <pending> with an event explaining why — see the
-# lesson for that experiment.
+# A pinned address must live inside a pool MetalLB owns, otherwise the Service
+# stays <pending> with an event explaining why.
 apiVersion: v1
 kind: Service
 metadata:
@@ -26,7 +24,30 @@ spec:
       port: 80
       targetPort: http
 ---
-# Two Services, one address, different ports.
+# A second app, so recipe 3 can prove that one VIP really serves two Services
+# and not just one Service twice.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whoami-b
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: whoami-b
+  template:
+    metadata:
+      labels:
+        app: whoami-b
+    spec:
+      containers:
+        - name: whoami
+          image: traefik/whoami:v1.10.2
+          ports:
+            - name: http
+              containerPort: 80
+---
+# Two Services, one address, different ports, different backends.
 #
 # MetalLB only colocates Services when they are explicit about it:
 #   * the same metallb.io/allow-shared-ip "sharing key",
@@ -62,7 +83,7 @@ metadata:
 spec:
   type: LoadBalancer
   selector:
-    app: whoami
+    app: whoami-b
   ports:
     - name: http-alt
       port: 8080

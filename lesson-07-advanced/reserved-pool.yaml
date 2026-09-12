@@ -1,13 +1,14 @@
-# Lesson 7, recipe 1 — a second pool that is NOT handed out automatically.
+# Lesson 7, recipe 1 — a pool that is NOT handed out automatically.
 #
-# autoAssign: false means "nobody gets an address from this pool unless they
-# explicitly ask for it" (via the metallb.io/address-pool annotation, or by
-# pinning an address that lives in it). This is how you keep a block of
-# addresses for special cases — ingress controllers, a database, whatever —
-# without risking a random Service consuming them.
+# autoAssign: false means nobody gets an address from this pool unless they ask
+# for it explicitly (the metallb.io/address-pool annotation, or by pinning an
+# address that lives in it). This is how you keep a block for special cases —
+# ingress controllers, a database, whatever — without a random Service
+# consuming it.
 #
-# A pool also has to be referenced by an advertisement to be usable at all, so
-# this pool gets its own BGPAdvertisement.
+# Allocation is MetalLB's job here, exactly as in phase 1. Whether these
+# addresses ever reach the network is a separate, Calico-side decision
+# (recipe 4).
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
@@ -17,12 +18,3 @@ spec:
   addresses:
     - 172.19.254.10-172.19.254.19
   autoAssign: false
----
-apiVersion: metallb.io/v1beta1
-kind: BGPAdvertisement
-metadata:
-  name: lab-bgp-reserved
-  namespace: metallb-system
-spec:
-  ipAddressPools:
-    - lab-pool-reserved
