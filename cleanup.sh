@@ -92,7 +92,7 @@ echo "=== 6/6 Course-related Docker resources still present ==="
 LEFT=$(docker ps -a --format '{{.Names}}\t{{.Image}}' | grep -E 'metallb|kind' || true)
 if [ -n "$LEFT" ]; then echo "$LEFT" | sed 's/^/  /'; else echo "  ✓ no course containers left"; fi
 docker images --format '{{.Repository}}:{{.Tag}}' \
-  | grep -E 'kindest/node|metallb|frrouting|alpine|poolwatch' | sed 's/^/  image: /' || true
+  | grep -E 'kindest/node|metallb|frrouting|alpine|poolwatch|netshoot|nginx' | sed 's/^/  image: /' || true
 
 echo ""
 echo "=== Done. Intentionally left untouched ==="

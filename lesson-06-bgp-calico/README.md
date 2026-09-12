@@ -173,12 +173,22 @@ docker exec metallb-router vtysh -c 'show bgp ipv4 unicast' | grep 172.19.255
 ## Step 5 — Reach it from a routed client
 
 ```bash
-docker run -d --name metallb-client --network kind --cap-add NET_ADMIN alpine:3.20 \
-  sh -c 'apk add --no-cache -q curl >/dev/null 2>&1; sleep infinity'
-sleep 10
+# netshoot ships curl, ip and tcpdump, so there is nothing to install
+docker run -d --name metallb-client --network kind --cap-add NET_ADMIN \
+  nicolaka/netshoot sleep infinity
 docker exec metallb-client ip route add 172.19.255.0/24 via 172.19.0.100
 docker exec metallb-client curl -s http://172.19.255.200 | head -3
 ```
+
+> 💡 **Why this image:** the client needs `ip route add` (to send VIP traffic to the router) and `curl` (to test it). `nicolaka/netshoot` has both, plus `tcpdump` for the ECMP capture in Step 6 — no install step, nothing to hang.
+>
+> 🧪 **Lab Hack — if 890 MB is too much:** `alpine:3.20` (13 MB) works just as well here, because Docker's networking is up so `apk` cannot hang the way it can inside a CNI-less pod:
+> ```bash
+> docker run -d --name metallb-client --network kind --cap-add NET_ADMIN alpine:3.20 \
+>   sh -c 'apk add --no-cache -q curl >/dev/null 2>&1; sleep infinity'
+> sleep 10
+> ```
+> BusyBox supplies `ip`, and the `apk add curl` gives you the one missing piece. Note that the `nginx` image is *not* suitable here: it has `curl` but no `ip`.
 
 ```console
 # expected
