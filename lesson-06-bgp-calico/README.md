@@ -75,8 +75,6 @@ Two things surprise people here:
 - **There is no `BGPConfiguration` object, and that is normal.** Calico only creates one when something needs to *change* a default. Absent means the built-in defaults apply: **AS `64512`** and the **node-to-node mesh on**. This is why Step 3 has to create it — `kubectl patch bgpconfiguration default` on a cluster like this fails with `NotFound`.
 - **Nothing in the IPPool says "no encapsulation".** With `encapsulation: None` from Lesson 5, neither `ipipMode` nor `vxlanMode` appears, and the absence of both *is* the setting. The `ipipMode: Never` style you find in older blog posts is the IPPool-level equivalent.
 
-> ⚠️ **If you ever disable the mesh**, Calico's docs are blunt: pod networking breaks until replacement `BGPPeer`s exist. Create the peers **first**, then disable. We keep the mesh here, so nothing breaks.
-
 ## Step 3 — Tell Calico about the router
 
 ```bash
@@ -137,7 +135,7 @@ kubectl get caliconodestatus worker-status \
 172.19.0.100  Established  GlobalPeer
 ```
 
-Two details worth noting: `updatePeriodSeconds` is **required** by the CRD (omit it and the API rejects the object with `Invalid value: "null"`), and every peer is labelled by `type` — `NodeMesh` for Calico's internal mesh, `GlobalPeer` for our `BGPPeer`. That distinction is what you want in a runbook: one is the pod network, the other is your service advertisement.
+Two details worth noting: `updatePeriodSeconds` is **required** by the CRD (the schema has no default), and every peer is labelled by `type` — `NodeMesh` for Calico's internal mesh, `GlobalPeer` for our `BGPPeer`. That distinction is what you want in a runbook: one is the pod network, the other is your service advertisement.
 
 > 🏭 **Production:** on a real node, `calicoctl node status` gives the same view (it talks to the local Calico agent, so it must run *on* the node). `CalicoNodeStatus` is the API-side equivalent, and is what you would query from CI or scrape.
 
@@ -170,20 +168,10 @@ Paths: (9 available, best #1, table default)
 
 **Every node advertises it, so the router installs three equal-cost next hops.** That is the fan-out that makes ECMP possible — and unlike phase 1, all three nodes participate, control-plane included (no node carries the `exclude-from-external-load-balancers` label here).
 
-> 🐞 **`/32` entries are not advertised in Calico 3.30.3 — use a CIDR.** The per-address form was tried first:
->
-> ```bash
-> # produces NO advertisements on 3.30.3 — verified, 0 routes after 60 seconds
-> kubectl patch bgpconfiguration default --type=merge -p \
->   '{"spec": {"serviceLoadBalancerIPs": [{"cidr": "172.19.255.200/32"},{"cidr":"172.19.255.201/32"}]}}'
-> ```
->
-> `172.19.255.0/24` appeared within seconds; the identical list written as four `/32`s stayed invisible for a full minute, while `calico-node` logged `Updates included service advertisement changes` — Calico accepted the config and advertised nothing. That matches the `/32` regressions in the 3.30 line: [`/32` rejected in `serviceExternalIPs` on 3.30+](https://github.com/projectcalico/calico/issues/10945) and a [/32 LoadBalancer fix](https://github.com/projectcalico/calico/pull/11917) that landed on the 3.29 branch. **Check your version before designing around `/32`s.**
->
-> The practical consequence: **Calico 3.30 gives you block-level advertisement only.** MetalLB's per-Service granularity has no equivalent, which changes two things:
->
-> - **Unused addresses get announced too.** Every address in the block is advertised whether or not a Service uses it, so clients can reach a black hole. There is no "withdraw when the Service has no endpoints" behaviour to rely on.
-> - **"Internal-only VIP" becomes a *pool* decision, not an address decision** (Lesson 7): keep a pool whose CIDR is simply absent from `serviceLoadBalancerIPs`.
+Note the granularity: `serviceLoadBalancerIPs` takes **blocks**. On Calico 3.30.3 the per-address `/32` form is not advertised at all — the block is the unit of advertisement, so MetalLB's per-Service granularity has no equivalent here. Two consequences:
+
+- **Unused addresses in the block are announced too.** There is no "withdraw when the Service has no endpoints" behaviour to rely on.
+- **"Internal-only VIP" becomes a *pool* decision, not an address decision** (Lesson 7): keep a pool whose CIDR is simply absent from `serviceLoadBalancerIPs`.
 
 ## Step 5 — Reach it from a routed client
 
@@ -256,15 +244,11 @@ metallb-router                 2a:d4:01:9a:98:c2     ← the 19 SYNs arriving
 
 **This is the whole promise of BGP mode, demonstrated.** Compare phase 1, where one elected node owned the VIP and every packet had to enter it. The cost is the block-level granularity from Step 4 and a static list to maintain.
 
-> ⚠️ **Do not capture with `docker exec -d` + `-w file`.** That form looks tidier but **silently produces an empty capture** often enough to waste an hour: the detached tcpdump is running, the traffic is flowing, and the file sits at its 24-byte pcap header with zero packets. (It is not a filter problem — the filter above is fine, and so is the file-writing form *when it works*.) The foreground `-c N` + `timeout` version cannot fail quietly: it prints packets as they arrive and exits on its own, so an empty result means genuinely no matching traffic.
-
 > 💡 If all connections land on one node, your router is hashing on layer 3 only. `router-setup.sh` sets `net.ipv4.fib_multipath_hash_policy=1` for exactly this reason, and it can only be set at container creation.
 
 ## Step 7 — `BGPFilter`: Calico's route policy
 
-One CIDR list means one policy for every peer. To control what crosses a specific session, attach a `BGPFilter` — this is the mechanism that stops your cluster telling the whole network about its pod blocks.
-
-**What the docs suggest does not work**, so start from the measured version — it is in `bgpfilter.yaml`:
+One CIDR list means one policy for every peer. To control what crosses a specific session, attach a `BGPFilter` — this is the mechanism that stops your cluster telling the whole network about its pod blocks. It is in `bgpfilter.yaml`:
 
 ```yaml
 spec:
@@ -286,7 +270,7 @@ kubectl apply -f bgpfilter.yaml
 kubectl patch bgppeer tor-router --type=merge -p '{"spec":{"filters":["services-only"]}}'
 ```
 
-Before and after, on the router:
+Rules are ordered, the first match wins, and the default when nothing matches is `Accept` — which is why the pattern is an explicit pair: accept the block you want out, then reject everything that is not in it. Before and after, on the router:
 
 ```console
 # before — Calico's pod blocks as well as the VIP block
@@ -301,14 +285,7 @@ Before and after, on the router:
 
 Two things make this safe, and both were verified: the **mesh is untouched** (a pod on `worker` still reached a pod on `worker2`, so `encapsulation: None` keeps working), and the **VIP still answers** (`200` from the routed client). A `BGPPeer` filter governs that one session with the router, not Calico's internal routing.
 
-> ⚠️ **Why the obvious version fails.** Calico's own examples use rules like `action: Reject, source: RemotePeers` and `action: Reject, interface: '*.calico'` as if they were catch-alls. They are not:
->
-> - `source: RemotePeers` matches routes **learned from** a peer — a transit-prevention rule. Calico's pod CIDRs are locally originated, so they match nothing.
-> - **Rules are ordered, the first match wins, and if nothing matches the default is `Accept`.** So a filter whose only `Reject` rule is "routes from remote peers" exports your pod blocks anyway.
->
-> Measured, with exactly that filter applied and the session `Established`: the router's table was **unchanged** — all three `/26`s still present. That is the failure mode to watch for: a filter that looks like policy and changes nothing. The explicit `Accept In` + `Reject NotIn` pair above is what actually narrows the session.
-
-> 💡 This also carries the lesson from phase 1: **an over-narrow export filter is a black hole that looks like a healthy session.** The session stays `Established` while the prefix never appears. Whenever you touch filters, check the *prefix list* on the router, not the session state.
+> 💡 This carries the lesson from phase 1: **an over-narrow export filter is a black hole that looks like a healthy session.** The session stays `Established` while the prefix never appears. Whenever you touch filters, check the *prefix list* on the router, not the session state.
 
 ## What you gave up, and what you gained
 
@@ -337,10 +314,10 @@ Two things make this safe, and both were verified: the **mesh is untouched** (a 
 
 ## Production note
 
-- **Pin Calico and test the advertisement path specifically.** `/32` handling has real churn in the 3.30 line (Step 4), and its failure is silent: a healthy session with no prefix.
+- **Pin Calico and verify the advertisement path after every upgrade.** Per-address handling has real churn in the 3.30 line (Step 4), and its failure is silent: a healthy session with no prefix.
 - **Design for block-level advertisement.** Segregate VIP classes into separate blocks — public, internal, per-tenant — because that block list is the only granularity on offer. It replaces the per-Service selectors you may be used to.
-- **Never point the block at addresses you cannot serve.** With no withdraw-on-empty behaviour, an announced-but-dead address is a black hole for clients.
-- **Keep the mesh on** unless you are deliberately moving to ToR peering or route reflectors; disabling it breaks pod routing until replacement peers exist.
+- **Keep each announced block aligned with the pools you allocate from.** With no withdraw-on-empty behaviour, every address in a block is reachable-or-black-hole for clients.
+- **The mesh stays on** for this design; moving to ToR peering or route reflectors means replacement peers exist first.
 - **Install the Calico `APIServer`** if you want to manage Calico with `kubectl` and the documented `projectcalico.org/v3` manifests (Lesson 5, trap 3).
 - **Watch prefix counts, not just session state.** `Established` with the wrong prefixes is this design's characteristic failure.
 

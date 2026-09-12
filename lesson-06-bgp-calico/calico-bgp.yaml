@@ -30,11 +30,9 @@ spec:
 # We create it explicitly, because Step 4 needs an object to patch, and because
 # spelling out the two values makes the cluster self-describing:
 #
-#   asNumber              → integer in the CRD. Do NOT quote it: the Calico docs
-#                           sometimes show "64512", but the schema says integer
-#                           and a string is rejected.
-#   nodeToNodeMeshEnabled → leave the mesh ON. With encapsulation: None, BGP is
-#                           how pod routes travel between nodes.
+#   asNumber              → integer in the CRD.
+#   nodeToNodeMeshEnabled → true. With encapsulation: None, BGP is how pod
+#                           routes travel between nodes.
 #
 # serviceLoadBalancerIPs is added in Step 4 with a merge patch.
 apiVersion: projectcalico.org/v3
