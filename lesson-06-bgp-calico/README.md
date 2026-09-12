@@ -90,6 +90,8 @@ kubectl apply -f calico-bgp.yaml
 docker exec metallb-router vtysh -c 'show bgp summary'
 ```
 
+> ⚠️ `no matches for kind "BGPPeer" in version "projectcalico.org/v3"` means kubectl cannot see Calico's CRDs. Either they are missing (`kubectl get crd | grep projectcalico`) — re-apply Lesson 5's `operator-crds.yaml` — or kubectl's discovery cache is stale: `rm -rf ~/.kube/cache` and retry.
+
 ```console
 # expected
 Neighbor        V         AS   MsgRcvd   MsgSent   TblVer  InQ OutQ  Up/Down State/PfxRcd
