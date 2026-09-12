@@ -111,9 +111,23 @@ metallb-calico-worker2          Ready    <none>          2m    v1.35.0
 
 ## Step 4 — Prove pod networking works before touching load balancing
 
+Split the check in two: **did the pod get an address**, then **does egress work**. Asking both at once tells you nothing when it fails — a pod with no network just hangs inside `apk add`, and `kubectl run -i` waits for ever instead of reporting anything.
+
 ```bash
-kubectl run nettest --rm -i --restart=Never --image=alpine:3.20 -- \
-  sh -c 'apk add --no-cache -q curl >/dev/null && curl -s -m 5 https://example.com -o /dev/null && echo "egress OK"; ip -4 addr show eth0 | grep inet'
+kubectl run nettest --image=alpine:3.20 --restart=Never --command -- sleep 300
+kubectl wait --for=condition=Ready pod/nettest --timeout=60s || kubectl describe pod nettest | tail -15
+```
+
+```console
+# expected
+pod/nettest condition met
+```
+
+```bash
+kubectl get pod nettest -o wide          # expect a 192.168.x.y pod IP and a node
+kubectl exec nettest -- sh -c \
+  'apk add --no-cache -q curl >/dev/null && curl -s -m 5 https://example.com -o /dev/null && echo "egress OK"; ip -4 addr show eth0 | grep inet'
+kubectl delete pod nettest
 ```
 
 ```console
@@ -121,6 +135,15 @@ kubectl run nettest --rm -i --restart=Never --image=alpine:3.20 -- \
 egress OK
     inet 192.168.xx.yy/32 scope global eth0
 ```
+
+> ⚠️ **If `kubectl wait` times out**, the pod has no network and the smoke test was never going to work. `kubectl describe pod nettest` names the reason (`network plugin`, `failed to set up sandbox`, …). Check in this order:
+> ```bash
+> kubectl get nodes                              # NotReady = still no CNI
+> kubectl get installation default               # was the Installation applied at all?
+> kubectl get tigerastatus                       # Calico's own component health
+> kubectl -n calico-system get pods -o wide      # calico-node on every node?
+> ```
+> The usual cause is Step 3 not having finished — most often the CRDs (`Installation` rejected) or the `Installation` never applied.
 
 Note the pod IP: `192.168.x.x`, not phase 1's `10.244.x.x`. Every pod-IP output in Lessons 1–4 changes accordingly — the lesson's *behaviour* does not.
 
