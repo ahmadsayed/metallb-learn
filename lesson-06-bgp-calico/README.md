@@ -64,25 +64,26 @@ Neighbor        V         AS   MsgRcvd   MsgSent   TblVer  InQ OutQ  Up/Down Sta
 ## Step 2 — Look at what Calico already does
 
 ```bash
-kubectl get bgpconfiguration default -o yaml
-kubectl get ippools.crd.projectcalico.org -o custom-columns=NAME:.metadata.name,CIDR:.spec.cidr,ENCAP:.spec.ipipMode
+kubectl get bgpconfiguration
+kubectl get ippools.crd.projectcalico.org default-ipv4-ippool -o jsonpath='{.spec}{"\n"}'
 ```
 
 ```console
 # expected
-spec:
-  asNumber: "64512"                # the default global AS
-  nodeToNodeMeshEnabled: true      # every node peers with every other node
+No resources found
+{"cidr":"192.168.0.0/16","blockSize":26,"natOutgoing":true,"nodeSelector":"all()"}
 ```
 
-Two things to notice:
+Two things to notice, both of which surprise people:
 
-- **The mesh is on.** That is how pod routes get around the cluster (with `encapsulation: None` from Lesson 5, BGP *is* the pod network). Leave it alone: it is doing a different job from the router peering.
-- **`asNumber: 64512`** — the same number MetalLB used in the old lesson, coincidentally, because 64512 is the default AS for both projects.
+- **There is no `BGPConfiguration` object, and that is normal.** Calico only creates one when something needs to *change* a default. Absent means the built-in defaults apply: **AS `64512`** and the **node-to-node mesh on**. This is why Step 4 must create it before it can be patched — `kubectl patch bgpconfiguration default` on a cluster like this fails with `NotFound`.
+- **Nothing in the IPPool says "no encapsulation".** With `encapsulation: None` from Lesson 5, neither `ipipMode` nor `vxlanMode` is set, and the absence of both *is* the setting. The older `ipipMode: Never` style you will find in blog posts is the IPPool-level equivalent.
 
 > ⚠️ **If you ever disable the mesh**, Calico's docs are blunt: pod networking breaks until replacement `BGPPeer`s exist. Create the peers **first**, then disable. We keep the mesh here, so nothing breaks.
 
 ## Step 3 — Tell Calico about the router
+
+`calico-bgp.yaml` does two things: peer every node with the router, and create the `default` `BGPConfiguration` we just established does not exist yet (with the mesh left on).
 
 ```bash
 kubectl apply -f calico-bgp.yaml
@@ -142,7 +143,7 @@ kubectl get caliconodestatus worker-status -o yaml | grep -A6 'bgp:'
 
 ## Step 4 — Teach Calico which addresses to announce
 
-MetalLB stopped at "here is your address". Calico needs the equivalent of `BGPAdvertisement`:
+MetalLB stopped at "here is your address". Calico needs the equivalent of `BGPAdvertisement` — and since Step 3 created the object, a merge-patch is now the right tool (it adds this one field without touching `asNumber` or the mesh flag):
 
 ```bash
 kubectl patch bgpconfiguration default --type=merge -p \
@@ -161,8 +162,6 @@ docker exec metallb-router vtysh -c 'show bgp ipv4 unicast' | grep 172.19.255
 ```
 
 **One entry per VIP, and every node advertises it** — that is the multi-path fan-out that makes ECMP possible, and it is why the router now has three next-hops for each address.
-
-`--type=merge` matters: a plain `kubectl apply` of a whole `BGPConfiguration` would replace the object and could drop settings Calico's operator put there (like the mesh flag). Patch, don't clobber.
 
 > 💡 **CIDR vs `/32` — the one trade-off to internalise.** You can list the whole block instead:
 > ```

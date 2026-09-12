@@ -1,18 +1,18 @@
 # Lesson 6 — tell Calico about the router, and about the VIPs it should announce.
 #
-# Two different resources, two different jobs — the same split MetalLB made with
+# Two resources, two jobs — the same split MetalLB made with
 # BGPPeer / BGPAdvertisement:
 #
-#   BGPPeer          : who to talk to, and in which AS        (this file)
-#   BGPConfiguration : which service addresses to advertise   (patched in the lesson)
+#   BGPPeer            : who to talk to, and in which AS
+#   BGPConfiguration   : cluster-wide BGP settings, including which service
+#                        addresses to advertise (added in Step 4)
 #
 # Calico peers are `projectcalico.org/v3` objects, so plain kubectl works —
 # calicoctl is a convenience, not a requirement.
 #
-# A BGPPeer with no nodeSelector is GLOBAL: every Calico node in the cluster
-# opens a session to the router. That is what we want here (and it is why BGP's
-# "one session per node pair" rule matters: MetalLB's speaker could not also
-# peer with this router).
+# A BGPPeer with no nodeSelector is GLOBAL: every Calico node opens a session to
+# the router. That is what we want here (and it is why BGP's "one session per
+# node pair" rule matters: MetalLB's speaker could not also peer with it).
 apiVersion: projectcalico.org/v3
 kind: BGPPeer
 metadata:
@@ -22,3 +22,25 @@ spec:
   asNumber: 64513          # the router's AS; Calico's own default AS is 64512
   # Optional: peer only from some nodes, e.g. dedicated "border" nodes
   # nodeSelector: rack == 'rack-1'
+---
+# A fresh Calico install has NO BGPConfiguration object — Calico only creates one
+# when something needs to change a default. Absent means "use the built-in
+# defaults": AS 64512, node-to-node mesh enabled.
+#
+# We create it explicitly, because Step 4 needs an object to patch, and because
+# spelling out the two values makes the cluster self-describing:
+#
+#   asNumber              → integer in the CRD. Do NOT quote it: the Calico docs
+#                           sometimes show "64512", but the schema says integer
+#                           and a string is rejected.
+#   nodeToNodeMeshEnabled → leave the mesh ON. With encapsulation: None, BGP is
+#                           how pod routes travel between nodes.
+#
+# serviceLoadBalancerIPs is added in Step 4 with a merge patch.
+apiVersion: projectcalico.org/v3
+kind: BGPConfiguration
+metadata:
+  name: default
+spec:
+  asNumber: 64512
+  nodeToNodeMeshEnabled: true
