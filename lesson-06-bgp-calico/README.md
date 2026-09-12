@@ -270,7 +270,9 @@ metallb-router                 2a:d4:01:9a:98:c2     ← the 19 SYNs arriving
 
 ## Step 7 — `BGPFilter`: Calico's route policy
 
-One CIDR list means one policy for every peer. To control what crosses a specific session, attach a `BGPFilter`:
+One CIDR list means one policy for every peer. To control what crosses a specific session, attach a `BGPFilter` — this is the mechanism that stops your cluster telling the whole network about its pod blocks.
+
+**What the docs suggest does not work**, so start from the measured version:
 
 ```yaml
 apiVersion: projectcalico.org/v3
@@ -281,9 +283,10 @@ spec:
   exportV4:
     - action: Accept
       matchOperator: In
-      cidr: 172.19.255.0/24      # only the VIP block leaves the cluster
+      cidr: 172.19.255.0/24     # the VIP block: let it out
     - action: Reject
-      source: RemotePeers
+      matchOperator: NotIn
+      cidr: 172.19.255.0/24     # everything else: keep it in
   importV4:
     - action: Reject
       matchOperator: NotIn
@@ -291,15 +294,50 @@ spec:
 ```
 
 ```bash
+kubectl apply -f - <<'EOF'
+apiVersion: projectcalico.org/v3
+kind: BGPFilter
+metadata:
+  name: services-only
+spec:
+  exportV4:
+    - action: Accept
+      matchOperator: In
+      cidr: 172.19.255.0/24
+    - action: Reject
+      matchOperator: NotIn
+      cidr: 172.19.255.0/24
+  importV4:
+    - action: Reject
+      matchOperator: NotIn
+      cidr: 172.19.255.0/24
+EOF
 kubectl patch bgppeer tor-router --type=merge -p '{"spec":{"filters":["services-only"]}}'
 ```
 
-Now the router's table holds only the VIP block — no pod CIDRs. Two rules of thumb:
+Before and after, on the router:
 
-- **rules are ordered** and the **first match wins**; if nothing matches, the default is `Accept`. A filter containing only `Reject`s rejects nothing you did not name, but one narrow `Accept` with no catch-all lets everything else through.
-- This carries the same failure mode as the router-side route-map: **an over-narrow export filter is a black hole that looks like a healthy session.** The session stays `Established` while the prefix never appears.
+```console
+# before — Calico's pod blocks as well as the VIP block
+192.168.64.64/26      # control-plane
+192.168.81.192/26     # worker
+192.168.237.192/26    # worker2
+172.19.255.0/24       # the VIP block
 
-> 💡 What `BGPFilter` cannot do: match on **communities** or set `localPref`. If your network team's policy depends on community tags per pool, that is a MetalLB feature Calico does not replace.
+# after — only what we agreed to advertise
+172.19.255.0/24
+```
+
+Two things make this safe, and both were verified: the **mesh is untouched** (a pod on `worker` still reached a pod on `worker2`, so `encapsulation: None` keeps working), and the **VIP still answers** (`200` from the routed client). A `BGPPeer` filter governs that one session with the router, not Calico's internal routing.
+
+> ⚠️ **Why the obvious version fails.** Calico's own examples use rules like `action: Reject, source: RemotePeers` and `action: Reject, interface: '*.calico'` as if they were catch-alls. They are not:
+>
+> - `source: RemotePeers` matches routes **learned from** a peer — a transit-prevention rule. Calico's pod CIDRs are locally originated, so they match nothing.
+> - **Rules are ordered, the first match wins, and if nothing matches the default is `Accept`.** So a filter whose only `Reject` rule is "routes from remote peers" exports your pod blocks anyway.
+>
+> Measured, with exactly that filter applied and the session `Established`: the router's table was **unchanged** — all three `/26`s still present. That is the failure mode to watch for: a filter that looks like policy and changes nothing. The explicit `Accept In` + `Reject NotIn` pair above is what actually narrows the session.
+
+> 💡 This also carries the lesson from phase 1: **an over-narrow export filter is a black hole that looks like a healthy session.** The session stays `Established` while the prefix never appears. Whenever you touch filters, check the *prefix list* on the router, not the session state.
 
 ## What you gave up, and what you gained
 
