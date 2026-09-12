@@ -21,6 +21,7 @@ Phase 1 (Lessons 0–4) needed nothing from the network: a flat Ethernet segment
 - `kind-config-calico.yaml` — 3 nodes, no default CNI, pod subnet matched to Calico's IPPool.
 - `install-calico.sh` — installs the Tigera operator and declares the `Installation` (no encapsulation).
 - `pool-controller-only.yaml` — the `IPAddressPool` (allocation only — no advertisements anywhere).
+- `controller-only-rbac.yaml` — workaround for the chart 0.16.1 RBAC bug (see Step 5).
 - the app itself is reused from phase 1: `../lesson-01-cluster/whoami.yaml`.
 
 ## Step 1 — Capture phase 1, then tear it down
@@ -179,6 +180,24 @@ metallb-controller-7c9f8d6b5b-x2vqk   1/1     Running   0          60s
 | `metallb-frr-k8s` | disabled | Existed only to give the speaker an FRR backend. No speaker, no FRR |
 
 The chart is built for this: with `speaker.enabled=false` it skips the speaker DaemonSet **and** the `metallb-excludel2` ConfigMap, which only the L2 responder reads.
+
+> 🐞 **Known bug in chart 0.16.1 — do not skip this step.** The chart renders the `metallb-pod-lister` Role *and* RoleBinding inside `{{- if .Values.speaker.enabled }}`. Disable the speaker and both disappear — but the **controller** uses that Role: its own Pod (for owner references), plus secrets, configmaps and all the MetalLB CRs it reads to allocate. The controller then dies at startup:
+>
+> ```console
+> error: pods "metallb-controller-xxx" is forbidden: User "system:serviceaccount:metallb-system:metallb-controller"
+>   cannot get resource "pods" in API group "" in the namespace "metallb-system"
+> msg: "unable to get own pod for owner references"
+> msg: "failed to create k8s client"
+> ```
+>
+> Fixed upstream by [PR #3069](https://github.com/metallb/metallb/pull/3069) — merged 2026-06-10, while the newest chart release (`0.16.1`) is from 2026-05-27. So no published chart has the fix yet, and controller-only installs need the workaround:
+>
+> ```bash
+> kubectl apply -f controller-only-rbac.yaml
+> kubectl rollout restart -n metallb-system deploy/metallb-controller
+> ```
+>
+> Once a chart containing #3069 is released, drop this file — the chart will create those objects itself.
 
 > 💡 Also delete any leftover advertisement CRs if you are re-running this on a cluster that used to have them. They are inert without a speaker, but they confuse the next reader:
 > ```bash

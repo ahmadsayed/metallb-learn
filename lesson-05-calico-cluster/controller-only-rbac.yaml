@@ -1,0 +1,59 @@
+# Lesson 5 — workaround for metalb/metallb#3069 (chart 0.16.1).
+#
+# Symptom: with `--set speaker.enabled=false`, the controller never starts:
+#
+#   error: pods "metallb-controller-xxx" is forbidden: User
+#   "system:serviceaccount:metallb-system:metallb-controller" cannot get
+#   resource "pods" in API group "" in the namespace "metallb-system"
+#   msg: "unable to get own pod for owner references"
+#   msg: "failed to create k8s client"
+#
+# Cause: the chart renders the `metallb-pod-lister` Role and RoleBinding inside
+# `{{- if .Values.speaker.enabled }}`. Disable the speaker and both vanish — but
+# the controller uses that Role too (its own pod for owner references, plus
+# secrets, configmaps and *all* the MetalLB CRs it reads to allocate addresses).
+#
+# Fixed upstream by PR #3069 ("helm: fix speaker.disabled configurations"),
+# merged 2026-06-10 — but the newest chart release is 0.16.1 from 2026-05-27,
+# so no published version contains the fix yet. Hence this file.
+#
+# Apply it after `helm install ... --set speaker.enabled=false`:
+#   kubectl apply -f controller-only-rbac.yaml
+#   kubectl rollout restart -n metallb-system deploy/metallb-controller
+#
+# Delete it once you upgrade to a chart that includes #3069 — the chart will
+# then create the same objects itself (and conflict with these).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: metallb-pod-lister
+  namespace: metallb-system
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["metallb.io"]
+    resources: ["bfdprofiles", "bgppeers", "l2advertisements", "bgpadvertisements",
+                "ipaddresspools", "communities"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: metallb-pod-lister
+  namespace: metallb-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: metallb-pod-lister
+subjects:
+  # Upstream also binds the speaker; with the speaker disabled there is none.
+  - kind: ServiceAccount
+    name: metallb-controller
+    namespace: metallb-system
