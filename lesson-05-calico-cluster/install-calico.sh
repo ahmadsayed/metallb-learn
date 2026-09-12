@@ -24,6 +24,13 @@ echo "=== 1/5 Install the operator CRDs ($CALICO_VERSION) ==="
 # (including installations.operator.tigera.io) are in operator-crds.yaml,
 # a ~2.6 MB manifest. Apply the CRDs first, or the Installation below fails
 # with: no matches for kind "Installation" in version "operator.tigera.io/v1".
+#
+# Why `apply` and not `replace`: replace requires every object to already
+# exist, so it would fail on a brand-new cluster — which is this script's whole
+# purpose. If the CRDs were previously created with `kubectl create`, the first
+# apply prints "missing the last-applied-configuration annotation" warnings and
+# patches the annotation on; the second run is silent. For a warning-free first
+# run, use `kubectl apply --server-side` (no last-applied annotation involved).
 kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/operator-crds.yaml"
 kubectl wait --for=condition=Established crd/installations.operator.tigera.io --timeout=180s
 
