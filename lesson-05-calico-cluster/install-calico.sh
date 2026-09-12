@@ -9,6 +9,22 @@
 # We use the operator because it exposes the pod-network settings as a CR you
 # can read back later, which is nicer for a course than a 5,000 line manifest.
 #
+# THREE things here are not obvious, and each one cost real debugging time:
+#
+#   1. tigera-operator.yaml contains NO CRDs (it is ~14 KB of namespace + RBAC +
+#      the operator Deployment). The CRDs are a separate 2.6 MB manifest.
+#   2. Those CRDs must be applied with --server-side: client-side apply stores
+#      the object in an annotation capped at 262144 bytes, and the
+#      installations CRD alone is 1.39 MB.
+#   3. The `Installation` gives you Calico *networking*. It does NOT give you
+#      the `projectcalico.org/v3` API that every Calico doc and CR manifest
+#      uses — that is served by an aggregated API server, deployed only when you
+#      create an `APIServer` object. Without it:
+#        kubectl apply -f <any calico CR> fails with
+#        no matches for kind "BGPPeer" in version "projectcalico.org/v3"
+#      even though `kubectl get crd | grep bgppeer` shows the CRD exists. The
+#      CRDs publish crd.projectcalico.org/v1; v3 comes from the API server.
+#
 # Run with:  ./install-calico.sh          (idempotent)
 set -euo pipefail
 
@@ -18,40 +34,27 @@ set -euo pipefail
 CALICO_VERSION="${CALICO_VERSION:-v3.30.3}"
 POD_CIDR="${POD_CIDR:-192.168.0.0/16}"
 
-echo "=== 1/5 Install the operator CRDs ($CALICO_VERSION) ==="
-# IMPORTANT: tigera-operator.yaml does NOT contain the CRDs — it is only
-# ~14 KB of namespace + RBAC + the operator Deployment. The 32 CRDs
-# (including installations.operator.tigera.io) are in operator-crds.yaml,
-# a ~2.6 MB manifest. Apply the CRDs first, or the Installation below fails
-# with: no matches for kind "Installation" in version "operator.tigera.io/v1".
-#
-# `--server-side` is REQUIRED here, not cosmetic. Client-side `apply` records the
-# whole object in the kubectl.kubernetes.io/last-applied-configuration
-# annotation, and Kubernetes caps an annotation at 262144 bytes. The
-# installations.operator.tigera.io CRD is 1.39 MB of YAML, so a client-side
-# apply fails with:
-#   The CustomResourceDefinition "installations.operator.tigera.io" is invalid:
-#   metadata.annotations: Too long: may not be more than 262144 bytes
-# Server-side apply tracks ownership in managedFields instead, with no
-# annotation — which is the documented workaround for large CRDs.
-#
-# `--force-conflicts` makes re-runs take ownership of CRDs that a previous
-# client-side `apply`/`create` left behind, instead of failing on a
-# field-manager conflict.
+echo "=== 1/6 Install the operator CRDs ($CALICO_VERSION) ==="
+# `--server-side` is REQUIRED, not cosmetic (see note 2 at the top).
+# `--force-conflicts` lets a re-run take ownership of CRDs a previous
+# client-side apply/create left behind, instead of failing on a conflict.
 kubectl apply --server-side --force-conflicts \
   -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/operator-crds.yaml"
 kubectl wait --for=condition=Established crd/installations.operator.tigera.io --timeout=180s
 
-echo "=== 2/5 Install the Tigera operator ==="
+echo "=== 2/6 Install the Tigera operator ==="
 kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/tigera-operator.yaml" >/dev/null
 kubectl -n tigera-operator rollout status deploy/tigera-operator --timeout=180s | tail -1
 
-echo "=== 3/5 Declare the Installation (no encapsulation, our pod CIDR) ==="
+echo "=== 3/6 Declare the Installation and the APIServer ==="
 # encapsulation: None = "all nodes share one L2 segment", which is exactly the
 # on-premises topology this course simulates: nodes and the router on the same
 # switch, with Calico routing pod traffic over BGP instead of tunnelling it.
 # If pod-to-pod traffic misbehaves in your environment, change it to IPIP (or
 # VXLANCrossSubnet) and re-apply — the BGP parts of lesson 6 are unaffected.
+#
+# APIServer: this is what makes projectcalico.org/v3 exist (see note 3).
+# Without it, every Calico CR manifest in this course fails to apply.
 kubectl apply -f - <<EOF
 apiVersion: operator.tigera.io/v1
 kind: Installation
@@ -65,9 +68,15 @@ spec:
         encapsulation: None
         natOutgoing: Enabled
         nodeSelector: all()
+---
+apiVersion: operator.tigera.io/v1
+kind: APIServer
+metadata:
+  name: default
+spec: {}
 EOF
 
-echo "=== 4/5 Wait for calico-node on every node ==="
+echo "=== 4/6 Wait for calico-node on every node ==="
 # The nodes stay NotReady until the CNI is up. This is expected on a
 # disableDefaultCNI cluster, not a failure.
 for i in $(seq 1 60); do
@@ -77,7 +86,19 @@ for i in $(seq 1 60); do
 done
 kubectl get nodes
 
-echo "=== 5/5 Calico components ==="
+echo "=== 5/6 Wait for the Calico API server (serves projectcalico.org/v3) ==="
+# The operator creates the calico-apiserver namespace a few seconds after the
+# APIServer object, so retry rather than waiting once on a namespace that does
+# not exist yet.
+for i in $(seq 1 60); do
+  kubectl -n calico-apiserver wait --for=condition=Available deploy/calico-apiserver --timeout=5s >/dev/null 2>&1 && break
+  sleep 5
+done
+kubectl api-resources --api-group=projectcalico.org 2>/dev/null | head -4
+echo "  (if that printed BGPPeer/BGPConfiguration, projectcalico.org/v3 is up)"
+
+echo "=== 6/6 Calico components ==="
 kubectl -n calico-system get pods 2>/dev/null | head -10 || kubectl -n kube-system get pods | grep calico
+kubectl -n calico-apiserver get pods 2>/dev/null | head -3
 echo
-echo "Next: install MetalLB controller-only, then run kubectl apply -f pool-controller-only.yaml"
+echo "Next: install MetalLB controller-only (lesson 5 step 5), then run kubectl apply -f pool-controller-only.yaml"

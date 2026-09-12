@@ -17,9 +17,19 @@
 # merged 2026-06-10 — but the newest chart release is 0.16.1 from 2026-05-27,
 # so no published version contains the fix yet. Hence this file.
 #
-# Apply it after `helm install ... --set speaker.enabled=false`:
+# Apply it BEFORE the helm install, in this order:
+#
+#   kubectl create namespace metallb-system
 #   kubectl apply -f controller-only-rbac.yaml
-#   kubectl rollout restart -n metallb-system deploy/metallb-controller
+#   helm install metallb metallb/metallb -n metallb-system \
+#     --set speaker.enabled=false --set frrk8s.enabled=false --wait
+#
+# Why that order: this file needs the namespace to exist, and the chart needs
+# these rules to exist before its controller starts. Install first and the pod
+# crash-loops, so `--wait` fails with
+#   INSTALLATION FAILED: context deadline exceeded
+# (a RoleBinding may reference a ServiceAccount that does not exist yet — RBAC
+# does not check that, which is what makes the pre-install ordering work).
 #
 # Delete it once you upgrade to a chart that includes #3069 — the chart will
 # then create the same objects itself (and conflict with these).

@@ -29,7 +29,7 @@ Lesson 3 gave every Service an address, first-come-first-served. Real clusters n
 > |---|---|
 > | 1, 2, 3, 5 (pools, pinning, sharing, namespace rules) | **unchanged** — these are all *allocation*, which is still MetalLB's controller |
 > | The `BGPAdvertisement` companion in the YAML files | replace with adding the pool's addresses to `BGPConfiguration.spec.serviceLoadBalancerIPs` (Lesson 6) |
-> | 4 (advertisement `serviceSelectors`) | **does not exist in Calico.** The equivalent is negative: an address whose `/32` is *absent* from `serviceLoadBalancerIPs` is invisible to the network — see the rewritten Recipe 4 |
+> | 4 (advertisement `serviceSelectors`) | **does not exist in Calico.** Its granularity is whole CIDR blocks, not addresses — and `/32` entries are not advertised at all on 3.30.3 (Lesson 6, Step 4). So internal-only means "a pool whose *block* is absent from `serviceLoadBalancerIPs`" — see the rewritten Recipe 4 |
 > | 6 (`speaker.ignoreExcludeLB`) | no speaker to configure; Calico honours the same node label — see the rewritten Recipe 6 |
 >
 > Recipes 4 and 6 below have been rewritten for phase 2; the YAML files for them stay as phase-1 artifacts for reference.
@@ -186,27 +186,48 @@ whoami-public     metallb-lab-worker2      # no rows for whoami-private
 
 > 💡 **BGP gotcha:** because the selector is evaluated per Service, "label it to publish" becomes a deployment-time decision, and `ServiceBGPStatus` is your audit trail of what is currently published. The same `serviceSelectors` field exists on `L2Advertisement` for ARP-based clusters.
 
-**🔀 Phase 2 (Calico): the same outcome, inverted.** Calico has no per-Service selector, so instead of *positively* selecting what to publish, you publish a list of addresses and everything else stays invisible:
+**🔀 Phase 2 (Calico): internal-only becomes a *pool* decision.** Calico has no per-Service selector, and — as Lesson 6 Step 4 measured — its advertisement granularity is a **whole CIDR block**: `/32` entries are accepted by the API but not advertised on 3.30.3. So you cannot hide one address inside an announced block. Instead you give internal VIPs their own block and simply never announce it:
+
+```yaml
+# two pools, two CIDRs, one of which nobody announces
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: lab-pool-public        # 172.19.254.100/28  → in BGPConfiguration
+spec:
+  addresses: ["172.19.254.100-172.19.254.109"]
+---
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: lab-pool-internal      # 172.19.252.0/28    → never listed
+spec:
+  addresses: ["172.19.252.1-172.19.252.14"]
+```
 
 ```bash
-# only whoami-public's /32 is announced; whoami-private is deliberately absent
+# announce the public block only
 kubectl patch bgpconfiguration default --type=merge -p \
-  '{"spec": {"serviceLoadBalancerIPs": [{"cidr": "172.19.254.100/32"}]}}'
+  '{"spec": {"serviceLoadBalancerIPs": [{"cidr": "172.19.254.96/28"}]}}'
 ```
 
 ```console
-# expected — the router knows one of the two addresses
-172.19.254.100/32   172.19.0.2      0 64512 i
-172.19.254.101      (absent)
+# expected — one block on the router, the other invisible
+172.19.254.96/28    172.19.0.2      0 64512 i
+(172.19.252.0/28 is never announced)
 ```
 
-The trade-off shifts from "which Services?" to "which addresses, maintained where?":
+The trade-off shifts from "which Services?" to "which *blocks*, maintained where?":
 
 | | Phase 1 (MetalLB `serviceSelectors`) | Phase 2 (Calico `serviceLoadBalancerIPs`) |
 |---|---|---|
-| The gate | a Service label | presence of the address in a list |
-| Changes at deploy time? | yes — label the Service | no — someone must edit `/32` list in `BGPConfiguration` |
+| The gate | a Service label | which CIDR blocks are listed |
+| Granularity | one Service | one block (256 addresses, or whatever you allocate) |
+| Changes at deploy time? | yes — label the Service | no — someone must edit the block list in `BGPConfiguration` |
+| Reuses addresses inside a block? | n/a | no — you cannot announce part of a block |
 | Audit trail | `ServiceBGPStatus` | the `BGPConfiguration` object itself |
+
+> ⚠️ Because whole blocks are announced, **plan the block boundaries like a network engineer:** one block per exposure class (public, internal, per-tenant), sized so you never need to announce "part of" one.
 
 That last row is the real cost: with Calico the "what is published" answer lives in one cluster-wide object, not next to each Service. Keep it in Git (Lesson 8).
 
@@ -324,7 +345,7 @@ docker exec metallb-router vtysh -c 'configure terminal' -c 'route-map LAB-IN pe
 | 1. `autoAssign: false` | new Service got `172.19.255.204` from `lab-pool`; reserved pool untouched |
 | 2. Pinning | `whoami-pinned` = `172.19.254.15`; out-of-pool request → `AllocationFailed`; overlapping pool → webhook denial |
 | 3. Sharing | both Services on `172.19.254.16`, ports 80 and 8080 both serve |
-| 4. `serviceSelectors` | `172.19.254.100` advertised, `172.19.254.101` allocated but invisible |
+| 4. `serviceSelectors` | phase 1: `172.19.254.100` advertised, `172.19.254.101` invisible. Phase 2: the whole announced block is visible; a pool in an unannounced block is not |
 | 5. Pool access | `team-a` got `172.19.254.200`; `default` got an `AllocationFailed` event |
 | 6. `ignoreExcludeLB` | control-plane advertises 9 prefixes; VIP went from 2 to 3 paths |
 | Gotcha | route-map implicit deny blackholed a pool until a `permit 20` was added |
@@ -340,7 +361,7 @@ kubectl delete namespace team-a
 
 - **Treat pool design as network design.** Overlaps are rejected, but *adjacency* problems are not: a pool inside your DHCP range, or inside a subnet the router will not route, is a real outage you can only prevent on paper.
 - **Use `autoAssign: false` + explicit pools for anything important.** Automatic allocation is convenient for labs and dangerous when a stray Service can consume your last public address.
-- **Prefer `serviceSelectors` over firewall rules for internal VIPs.** No route, nothing to leak.
+- **Prefer an unannounced block over firewall rules for internal VIPs.** No route, nothing to leak — and on the Calico cluster it is the *only* mechanism, since advertisement granularity is a whole CIDR.
 - **`aggregationLength` is the scaling lever for BGP.** Thousands of `/32`s can exhaust a router's FIB; rolling them into a handful of aggregates keeps the fabric small — but understand the trade-off: an aggregate is announced as long as *any* address in it is live.
 - **Document the annotations you rely on.** They are invisible in `kubectl get svc` output unless you ask for them, which is exactly why this lesson ends with a cheat sheet instead of a wall of YAML.
 
