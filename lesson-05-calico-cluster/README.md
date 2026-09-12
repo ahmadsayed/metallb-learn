@@ -111,10 +111,10 @@ metallb-calico-worker2          Ready    <none>          2m    v1.35.0
 
 ## Step 4 — Prove pod networking works before touching load balancing
 
-Split the check in two: **did the pod get an address**, then **does egress work**. Asking both at once tells you nothing when it fails — a pod with no network just hangs inside `apk add`, and `kubectl run -i` waits for ever instead of reporting anything.
+Split the check in two: **did the pod get an address**, then **does egress work**. Keep it in two parts even with a `curl`-shipping image, because a pod with no CNI produces *no output at all* — a single combined one-liner leaves you staring at a hang instead of an error.
 
 ```bash
-kubectl run nettest --image=alpine:3.20 --restart=Never --command -- sleep 300
+kubectl run nettest --image=nginx --restart=Never --command -- sleep 300
 kubectl wait --for=condition=Ready pod/nettest --timeout=60s || kubectl describe pod nettest | tail -15
 ```
 
@@ -125,16 +125,25 @@ pod/nettest condition met
 
 ```bash
 kubectl get pod nettest -o wide          # expect a 192.168.x.y pod IP and a node
-kubectl exec nettest -- sh -c \
-  'apk add --no-cache -q curl >/dev/null && curl -s -m 5 https://example.com -o /dev/null && echo "egress OK"; ip -4 addr show eth0 | grep inet'
+kubectl exec nettest -- curl -s -m 5 http://httpbin.org/headers
 kubectl delete pod nettest
 ```
 
 ```console
 # expected
-egress OK
-    inet 192.168.xx.yy/32 scope global eth0
+{
+  "headers": {
+    "Accept": "*/*",
+    "Host": "httpbin.org",
+    "User-Agent": "curl/8.14.1",
+    "X-Amzn-Trace-Id": "Root=1-..."
+  }
+}
 ```
+
+`httpbin.org` echoes your request headers back, so one command proves DNS resolved, traffic left the cluster through the node's NAT, and a response came home. If httpbin is ever down, `curl -sS -o /dev/null -w 'HTTP %{http_code}\n' https://example.com` proves the same thing.
+
+> 💡 **Why `nginx` and not `alpine`:** this image already ships `curl`, so there is no `apk add curl` in the path — and that install is precisely the step that hangs for ever when the pod has no network, which turns a clear failure into a silent one. The cost is a ~190 MB pull instead of ~13 MB.
 
 > ⚠️ **If `kubectl wait` times out**, the pod has no network and the smoke test was never going to work. `kubectl describe pod nettest` names the reason (`network plugin`, `failed to set up sandbox`, …). Check in this order:
 > ```bash
@@ -145,13 +154,19 @@ egress OK
 > ```
 > The usual cause is Step 3 not having finished — most often the CRDs (`Installation` rejected) or the `Installation` never applied.
 
-> 💡 **Shortcut when you just want a yes/no on connectivity:** use an image that already ships `curl`, so there is no `apk add` to hang on —
-> ```bash
-> kubectl run nginx --rm -i --restart=Never --image=nginx -- curl -s http://httpbin.org/headers
-> ```
-> A JSON header echo proves DNS + egress in one line (cost: a ~190 MB image pull). It still cannot tell you *why* things failed, which is what the two-step version above is for.
-
 Note the pod IP: `192.168.x.x`, not phase 1's `10.244.x.x`. Every pod-IP output in Lessons 1–4 changes accordingly — the lesson's *behaviour* does not.
+
+> 💡 **Egress is not the whole story.** Everything above would pass even if pod traffic were tunnelled, so it does not yet prove this cluster's `encapsulation: None` choice works. The test that does is **pod-to-pod across two different nodes** — run it once here, before anything is built on top:
+> ```bash
+> kubectl apply -f ../lesson-01-cluster/whoami.yaml
+> kubectl get pods -l app=whoami -o wide
+> NODE_A=$(kubectl get pods -l app=whoami -o jsonpath='{.items[0].spec.nodeName}')
+> POD_B=$(kubectl get pods -l app=whoami -o jsonpath='{.items[1].status.podIP}')
+> kubectl run crossnode --rm -i --restart=Never --image=nginx \
+>   --overrides="{\"apiVersion\":\"v1\",\"spec\":{\"nodeName\":\"$NODE_A\"}}" \
+>   -- curl -s -m 5 http://$POD_B | head -3
+> ```
+> A `Hostname: whoami-…` response means node A reached a pod on another node with **no tunnel**. A timeout means it did not — switch `encapsulation` to `IPIP` in the `Installation` and re-apply; Lesson 6's BGP work is unaffected either way.
 
 ## Step 5 — Install MetalLB with everything except the controller disabled
 
