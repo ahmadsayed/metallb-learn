@@ -1,0 +1,43 @@
+# Lesson 5, Step 3 — what kind of Calico cluster this is.
+#
+# Applied by install-calico.sh. Two objects, two jobs:
+#
+#   Installation — the pod network: which CIDR, whether traffic is encapsulated.
+#   APIServer    — Calico's aggregated API server, which is what makes
+#                  `projectcalico.org/v3` exist. WITHOUT IT, every Calico CR in
+#                  this course fails to apply with:
+#                    no matches for kind "BGPPeer" in version "projectcalico.org/v3"
+#                  even though `kubectl get crd | grep bgppeer` shows the CRD is
+#                  present. The CRDs publish crd.projectcalico.org/v1; v3 is
+#                  served by the API server this object deploys.
+#
+# encapsulation: None = "all nodes share one L2 segment": the on-premises
+# topology this course simulates, with nodes and the router on the same switch
+# and Calico routing pod traffic over BGP instead of tunnelling it. It is what
+# makes Lesson 6's routing table meaningful — and Lesson 5 Step 4 proves it works
+# by curling a pod on one node from a pod on another.
+#
+# If pod-to-pod traffic misbehaves in your environment, change `encapsulation`
+# to IPIP (or VXLANCrossSubnet) and re-apply — Lesson 6 is unaffected either way.
+#
+# Keep `cidr` in step with `networking.podSubnet` in kind-config-calico.yaml
+# (192.168.0.0/16). Calico's own default is also 192.168.0.0/16, which is why
+# the kind config was set to match rather than the other way round.
+apiVersion: operator.tigera.io/v1
+kind: Installation
+metadata:
+  name: default
+spec:
+  calicoNetwork:
+    ipPools:
+      - name: default-ipv4-ippool
+        cidr: 192.168.0.0/16
+        encapsulation: None
+        natOutgoing: Enabled
+        nodeSelector: all()
+---
+apiVersion: operator.tigera.io/v1
+kind: APIServer
+metadata:
+  name: default
+spec: {}

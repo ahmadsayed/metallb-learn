@@ -1,0 +1,40 @@
+# Lesson 6, Step 7 — keep the pod network out of your router's table.
+#
+# One CIDR list (BGPConfiguration.spec.serviceLoadBalancerIPs) means one policy
+# for every peer. A BGPFilter lets you control what crosses one specific BGP
+# session — here, the session with the "datacenter router".
+#
+# WHY THESE RULES AND NOT THE ONES IN CALICO'S EXAMPLES:
+#   * Rules are ordered, the FIRST match wins, and if nothing matches the
+#     default action is **Accept**.
+#   * `source: RemotePeers` (used in the docs' examples) matches routes LEARNED
+#     FROM a peer — a transit-prevention rule. Calico's own pod CIDRs are
+#     locally originated, so they match nothing and are exported anyway.
+#   * Measured with exactly that docs-style filter applied and the session
+#     Established: the router's table was unchanged, all three pod /26s still
+#     present. A filter that looked like policy and changed nothing.
+#
+# So the working pattern is an explicit pair: accept the block you want out,
+# then reject everything that is not in it.
+#
+# Verified effect (Lesson 6, Step 7):
+#   before:  192.168.64.64/26  192.168.81.192/26  192.168.237.192/26  172.19.255.0/24
+#   after:   172.19.255.0/24
+# and nothing else broke: the node-to-node mesh is untouched (pod-to-pod across
+# nodes still worked) and the VIP kept answering.
+apiVersion: projectcalico.org/v3
+kind: BGPFilter
+metadata:
+  name: services-only
+spec:
+  exportV4:
+    - action: Accept
+      matchOperator: In
+      cidr: 172.19.255.0/24     # the VIP block: let it out
+    - action: Reject
+      matchOperator: NotIn
+      cidr: 172.19.255.0/24     # everything else: keep it in
+  importV4:
+    - action: Reject
+      matchOperator: NotIn
+      cidr: 172.19.255.0/24     # we only trust the VIP block from the router

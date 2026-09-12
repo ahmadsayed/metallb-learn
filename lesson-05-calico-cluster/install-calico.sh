@@ -32,7 +32,6 @@ set -euo pipefail
 # releases (see the lesson's production notes), so "latest" is not a good
 # default for a lab you want to reproduce.
 CALICO_VERSION="${CALICO_VERSION:-v3.30.3}"
-POD_CIDR="${POD_CIDR:-192.168.0.0/16}"
 
 echo "=== 1/6 Install the operator CRDs ($CALICO_VERSION) ==="
 # `--server-side` is REQUIRED, not cosmetic (see note 2 at the top).
@@ -47,34 +46,11 @@ kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/${CALIC
 kubectl -n tigera-operator rollout status deploy/tigera-operator --timeout=180s | tail -1
 
 echo "=== 3/6 Declare the Installation and the APIServer ==="
-# encapsulation: None = "all nodes share one L2 segment", which is exactly the
-# on-premises topology this course simulates: nodes and the router on the same
-# switch, with Calico routing pod traffic over BGP instead of tunnelling it.
-# If pod-to-pod traffic misbehaves in your environment, change it to IPIP (or
-# VXLANCrossSubnet) and re-apply — the BGP parts of lesson 6 are unaffected.
-#
-# APIServer: this is what makes projectcalico.org/v3 exist (see note 3).
-# Without it, every Calico CR manifest in this course fails to apply.
-kubectl apply -f - <<EOF
-apiVersion: operator.tigera.io/v1
-kind: Installation
-metadata:
-  name: default
-spec:
-  calicoNetwork:
-    ipPools:
-      - name: default-ipv4-ippool
-        cidr: ${POD_CIDR}
-        encapsulation: None
-        natOutgoing: Enabled
-        nodeSelector: all()
----
-apiVersion: operator.tigera.io/v1
-kind: APIServer
-metadata:
-  name: default
-spec: {}
-EOF
+# Both objects live in calico-installation.yaml so you can read and change them
+# without editing this script. The APIServer is the non-obvious one: the
+# Installation gives you Calico *networking*, the APIServer gives you the
+# projectcalico.org/v3 API that every Calico CR manifest in this course uses.
+kubectl apply -f calico-installation.yaml
 
 echo "=== 4/6 Wait for calico-node on every node ==="
 # The nodes stay NotReady until the CNI is up. This is expected on a

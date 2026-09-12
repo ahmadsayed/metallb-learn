@@ -18,7 +18,9 @@ In Lesson 5 MetalLB allocated `172.19.255.200` and **nobody announced it**. This
 
 ## Files
 - `router-setup.sh` — the FRR "datacenter router" container, peering with the Calico nodes (AS `64512`).
-- `calico-bgp.yaml` — a global `BGPPeer` **and** the `default` `BGPConfiguration`.
+- `calico-bgp.yaml` — a global `BGPPeer` **and** the `default` `BGPConfiguration` (Step 3).
+- `caliconodestatus.yaml` — ask a node for its BGP peer state (Step 3).
+- `bgpfilter.yaml` — export/import policy for the router session (Step 7).
 
 ## Step 1 — Build the router
 
@@ -124,17 +126,7 @@ Your ToR learning pod routes is normal and useful: it is what makes `encapsulati
 Verify from Calico's side without shelling into a node:
 
 ```bash
-kubectl apply -f - <<'EOF'
-apiVersion: projectcalico.org/v3
-kind: CalicoNodeStatus
-metadata:
-  name: worker-status
-spec:
-  node: metallb-calico-worker
-  classes:
-    - BGP
-  updatePeriodSeconds: 30
-EOF
+kubectl apply -f caliconodestatus.yaml
 kubectl get caliconodestatus worker-status \
   -o jsonpath='{range .status.bgp.peersV4[*]}{.peerIP}{"  "}{.state}{"  "}{.type}{"\n"}{end}'
 ```
@@ -272,13 +264,9 @@ metallb-router                 2a:d4:01:9a:98:c2     ← the 19 SYNs arriving
 
 One CIDR list means one policy for every peer. To control what crosses a specific session, attach a `BGPFilter` — this is the mechanism that stops your cluster telling the whole network about its pod blocks.
 
-**What the docs suggest does not work**, so start from the measured version:
+**What the docs suggest does not work**, so start from the measured version — it is in `bgpfilter.yaml`:
 
 ```yaml
-apiVersion: projectcalico.org/v3
-kind: BGPFilter
-metadata:
-  name: services-only
 spec:
   exportV4:
     - action: Accept
@@ -294,24 +282,7 @@ spec:
 ```
 
 ```bash
-kubectl apply -f - <<'EOF'
-apiVersion: projectcalico.org/v3
-kind: BGPFilter
-metadata:
-  name: services-only
-spec:
-  exportV4:
-    - action: Accept
-      matchOperator: In
-      cidr: 172.19.255.0/24
-    - action: Reject
-      matchOperator: NotIn
-      cidr: 172.19.255.0/24
-  importV4:
-    - action: Reject
-      matchOperator: NotIn
-      cidr: 172.19.255.0/24
-EOF
+kubectl apply -f bgpfilter.yaml
 kubectl patch bgppeer tor-router --type=merge -p '{"spec":{"filters":["services-only"]}}'
 ```
 

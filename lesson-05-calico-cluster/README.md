@@ -18,7 +18,8 @@ Phase 1 needed nothing from the network: a flat Ethernet segment and ARP were en
 
 ## Files
 - `kind-config-calico.yaml` — 3 nodes, no default CNI, pod subnet matched to Calico's IPPool.
-- `install-calico.sh` — installs the operator CRDs, the operator, the `Installation` **and the `APIServer`**.
+- `install-calico.sh` — installs the operator CRDs, the operator, then `calico-installation.yaml`.
+- `calico-installation.yaml` — the `Installation` (pod CIDR, no encapsulation) **and the `APIServer`** (Step 3).
 - `controller-only-rbac.yaml` — workaround for the chart 0.16.1 RBAC bug (Step 5).
 - `pool-controller-only.yaml` — the `IPAddressPool` (allocation only — no advertisements anywhere).
 - the app itself is reused from phase 1: `../lesson-01-cluster/whoami.yaml`.
@@ -92,7 +93,7 @@ metallb-calico-worker2         172.19.0.2
 ## Step 3 — Install Calico
 
 ```bash
-./install-calico.sh
+./install-calico.sh        # applies calico-installation.yaml part-way through
 ```
 
 ```console

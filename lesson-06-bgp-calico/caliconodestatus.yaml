@@ -1,0 +1,23 @@
+# Lesson 6, Step 3 — ask a node what its BGP peers are, without shelling into it.
+#
+# `calicoctl node status` shows the same thing, but it talks to the local Calico
+# agent, so it has to run ON the node. This CR is the API-side equivalent: create
+# it and read the status back with kubectl.
+#
+# NOTE: `updatePeriodSeconds` is REQUIRED by the CRD. Omit it and the API
+# rejects the object with:
+#   UpdatePeriodSeconds: Invalid value: "null": ... because of Tag: required
+#
+# The status distinguishes peer types, which is what makes it useful in a
+# runbook:
+#   NodeMesh   — Calico's internal mesh (the pod network)
+#   GlobalPeer — the BGPPeer from calico-bgp.yaml (our service advertisement)
+apiVersion: projectcalico.org/v3
+kind: CalicoNodeStatus
+metadata:
+  name: worker-status
+spec:
+  node: metallb-calico-worker
+  classes:
+    - BGP
+  updatePeriodSeconds: 30
