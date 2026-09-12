@@ -91,13 +91,14 @@ Two Services are deliberately broken, because those are the states you need to r
 
 ## Cleanup
 
-Tear down everything the lessons created:
+Tear down everything the lessons created — **both phases**:
 
 ```bash
-./cleanup.sh
+./cleanup.sh                 # deletes metallb-lab AND metallb-calico
+./cleanup.sh metallb-calico  # or just one cluster, by name
 ```
 
-It is idempotent — safe to run at any time. It deletes the kind cluster (which removes every namespace, pool, Service and controller from the lessons), the router and client containers, the locally built images, and prints what it intentionally left alone.
+It is idempotent, and honest about what it does: it checks for each object before touching it, so you get `- not present` instead of a claim of work it never did. Deleting a kind cluster removes everything inside it — MetalLB, Calico, every pool, Service and VIP, the `poolwatch` and `team-a` namespaces, Calico's `tigera-operator`/`calico-system` namespaces — and the script also removes the lab containers (router, client, ARP capture), the built `poolwatch:lab` image, and then checks for strays and leftover evidence files. Calico needs no host-side cleanup: it leaves nothing outside the cluster.
 
 ## Reference
 

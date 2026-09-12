@@ -33,7 +33,7 @@ kubectl get svc -A -o wide > /tmp/phase1-services.txt
 ./cleanup.sh
 ```
 
-> 💡 `cleanup.sh` deletes the `metallb-lab` cluster, the router and client containers and the `poolwatch:lab` image. Your `~/.kube/config` context goes with the cluster.
+> 💡 `cleanup.sh` removes **both** phase clusters (`metallb-lab` and `metallb-calico`), the router/client/capture containers and the `poolwatch:lab` image. Pass a name to remove just one — `./cleanup.sh metallb-lab` — which is what you want here if you intend to keep a phase-2 cluster around. Your `~/.kube/config` context goes away with its cluster.
 
 ## Step 2 — Create the phase-2 cluster
 
