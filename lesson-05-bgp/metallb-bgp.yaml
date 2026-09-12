@@ -1,0 +1,31 @@
+# Lesson 5 — the MetalLB half of the BGP peering.
+#
+# BGPPeer         : who to talk to, and as which autonomous system
+# BGPAdvertisement: which pools to advertise over those sessions
+#
+# Note the API version: BGPPeer is v1beta2 in current MetalLB (v1beta1 still
+# served but deprecated); BGPAdvertisement is still v1beta1.
+#
+# Applying these does NOT stop layer 2 announcements by itself — an
+# L2Advertisement and a BGPAdvertisement can happily announce the same pool at
+# the same time, which is almost never what you want. Lesson 5 starts by
+# deleting the L2Advertisement: from here on this cluster is a BGP cluster.
+apiVersion: metallb.io/v1beta2
+kind: BGPPeer
+metadata:
+  name: lab-router
+  namespace: metallb-system
+spec:
+  myASN: 64512                      # our AS — what the nodes claim to be
+  peerASN: 64513                    # the router's AS
+  peerAddress: 172.19.0.100         # the FRR container from router-setup.sh
+  # No nodeSelectors: every node with a speaker peers with the router.
+---
+apiVersion: metallb.io/v1beta1
+kind: BGPAdvertisement
+metadata:
+  name: lab-bgp
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - lab-pool

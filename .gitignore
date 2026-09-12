@@ -2,3 +2,6 @@
 *.log
 tmp/
 .kubeconfig*
+
+# MetalLB source checkout used by Part II (clone it yourself, see lesson 9)
+.src/

@@ -1,0 +1,69 @@
+# Lesson 7, recipe 2 — asking for exactly the address you want.
+#
+#   metallb.io/address-pool: lab-pool-reserved   → which pool to allocate from
+#   metallb.io/loadBalancerIPs: 172.19.254.15   → the exact address to use
+#
+# Prefer the annotation over spec.loadBalancerIP: the field is deprecated in
+# the Kubernetes API (and it cannot express dual-stack). Both are still honoured
+# by MetalLB.
+#
+# A pinned address must live inside a pool MetalLB owns, otherwise allocation
+# fails and the Service stays <pending> with an event explaining why — see the
+# lesson for that experiment.
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami-pinned
+  annotations:
+    metallb.io/address-pool: lab-pool-reserved
+    metallb.io/loadBalancerIPs: 172.19.254.15
+spec:
+  type: LoadBalancer
+  selector:
+    app: whoami
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Two Services, one address, different ports.
+#
+# MetalLB only colocates Services when they are explicit about it:
+#   * the same metallb.io/allow-shared-ip "sharing key",
+#   * different ports (80 vs 8080 here),
+#   * and either both externalTrafficPolicy: Cluster, or the exact same pod
+#     selector.
+# Pinning the address makes the sharing deterministic instead of "may share".
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami-shared-a
+  annotations:
+    metallb.io/address-pool: lab-pool-reserved
+    metallb.io/loadBalancerIPs: 172.19.254.16
+    metallb.io/allow-shared-ip: "lab-shared-1"
+spec:
+  type: LoadBalancer
+  selector:
+    app: whoami
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami-shared-b
+  annotations:
+    metallb.io/address-pool: lab-pool-reserved
+    metallb.io/loadBalancerIPs: 172.19.254.16
+    metallb.io/allow-shared-ip: "lab-shared-1"
+spec:
+  type: LoadBalancer
+  selector:
+    app: whoami
+  ports:
+    - name: http-alt
+      port: 8080
+      targetPort: http
