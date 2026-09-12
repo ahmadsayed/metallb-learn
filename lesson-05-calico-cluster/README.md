@@ -94,6 +94,11 @@ spec:
 
 > 💡 **Why no encapsulation?** All three nodes (and, later, the router) share one Docker bridge — the same "one L2 segment" topology as phase 1, and the on-premises topology Calico expects when peering with a ToR. With `encapsulation: None`, Calico routes pod traffic directly between nodes over BGP instead of tunnelling it, which is what makes the next lesson's routing table meaningful. If pod-to-pod traffic misbehaves in your environment, change `encapsulation` to `IPIP` and re-apply — the BGP parts of Lesson 6 are unaffected either way.
 
+> ⚠️ **Two failures this script exists to prevent**, both of which cost real time if you install Calico by hand:
+>
+> 1. **`tigera-operator.yaml` contains no CRDs** (~14 KB: namespace, RBAC, Deployment). The 32 CRDs live in a separate `operator-crds.yaml` (~2.6 MB). Skip it and the `Installation` fails with `no matches for kind "Installation" in version "operator.tigera.io/v1"`.
+> 2. **The CRDs need `kubectl apply --server-side`.** Client-side apply stores the whole object in the `last-applied-configuration` annotation, and annotations are capped at 262144 bytes — while `installations.operator.tigera.io` alone is **1.39 MB** of YAML. Client-side apply dies with `metadata.annotations: Too long`. Server-side apply tracks ownership in `managedFields` instead, so it has no such limit. (`gatewayapis.operator.tigera.io` at 303 KB survives client-side apply only because the limit applies to the JSON copy in the annotation, which encodes smaller than the YAML.)
+
 Nodes go `Ready` once `calico-node` is running on each one:
 
 ```console

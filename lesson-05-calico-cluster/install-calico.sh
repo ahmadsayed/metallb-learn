@@ -25,13 +25,21 @@ echo "=== 1/5 Install the operator CRDs ($CALICO_VERSION) ==="
 # a ~2.6 MB manifest. Apply the CRDs first, or the Installation below fails
 # with: no matches for kind "Installation" in version "operator.tigera.io/v1".
 #
-# Why `apply` and not `replace`: replace requires every object to already
-# exist, so it would fail on a brand-new cluster — which is this script's whole
-# purpose. If the CRDs were previously created with `kubectl create`, the first
-# apply prints "missing the last-applied-configuration annotation" warnings and
-# patches the annotation on; the second run is silent. For a warning-free first
-# run, use `kubectl apply --server-side` (no last-applied annotation involved).
-kubectl apply -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/operator-crds.yaml"
+# `--server-side` is REQUIRED here, not cosmetic. Client-side `apply` records the
+# whole object in the kubectl.kubernetes.io/last-applied-configuration
+# annotation, and Kubernetes caps an annotation at 262144 bytes. The
+# installations.operator.tigera.io CRD is 1.39 MB of YAML, so a client-side
+# apply fails with:
+#   The CustomResourceDefinition "installations.operator.tigera.io" is invalid:
+#   metadata.annotations: Too long: may not be more than 262144 bytes
+# Server-side apply tracks ownership in managedFields instead, with no
+# annotation — which is the documented workaround for large CRDs.
+#
+# `--force-conflicts` makes re-runs take ownership of CRDs that a previous
+# client-side `apply`/`create` left behind, instead of failing on a
+# field-manager conflict.
+kubectl apply --server-side --force-conflicts \
+  -f "https://raw.githubusercontent.com/projectcalico/calico/${CALICO_VERSION}/manifests/operator-crds.yaml"
 kubectl wait --for=condition=Established crd/installations.operator.tigera.io --timeout=180s
 
 echo "=== 2/5 Install the Tigera operator ==="
