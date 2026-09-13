@@ -3,6 +3,7 @@
 ## Glossary
 | Term | What it means |
 |------|---------------|
+| **ToR** | *Top of Rack* — the switch your servers uplink to, and the device that must learn your VIP routes to pass them into the fabric. This lab's `tor-router` is an FRR container playing that part |
 | **node-to-node mesh** | Calico's default: every node peers with every other node (iBGP) to exchange *pod* routes |
 | **global `BGPPeer`** | A Calico peer object with no `nodeSelector` → every node opens that session |
 | **`asNumber`** | The AS a peer belongs to. **Calico's default is `64512`** |

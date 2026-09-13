@@ -1,3 +1,4 @@
+
 # Lesson 7, recipe 5 — who is allowed to use a pool.
 #
 # serviceAllocation lets a pool declare which namespaces (or which Services, via
